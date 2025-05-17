@@ -19,10 +19,9 @@ import com.example.demo.Service.FeedbackService;
 import com.example.demo.Service.ReportService;
 
 import java.util.Map;
-
-import java.time.LocalDateTime;
 import java.time.LocalDate;
-
+import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
 
 @Controller
@@ -149,31 +148,97 @@ public class DoctorAppointmentController {
     }
     
 
+
+    
     @PostMapping("/{appointmentId}/complete")
     @ResponseBody
-    public ResponseEntity<Map<String, Object>> completeAppointment(
+    public Map<String, Object> completeAppointment(
             @PathVariable Long appointmentId,
-            @RequestBody(required = false) Map<String, Object> requestBody,
             Authentication authentication) {
+                     Map<String, Object> response = new HashMap<>();
 
         try {
              String email = authentication.getName();
             Doctor doctor = (Doctor) userService.findByEmail(email);
             Appointment appointment = appointmentService.completeAppointment(appointmentId, doctor);
             reportService.createReport(appointment);
-
-            return ResponseEntity.ok(Map.of(
-                "success", true,
-                "message", "Appointment marked as completed",
-                "appointment", appointment
-            ));
+                response.put("success", true);
+            response.put("message", "Appointment marked as completed successfully.");
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(Map.of(
-                "success", false,
-                "message", e.getMessage()
-            ));
+            response.put("success", false);
+            response.put("message", "An error occurred: " + e.getMessage());
         }
+        return response;
     }
+
+
+     @PostMapping("/feedback")
+    @ResponseBody
+    public Map<String, Object> submitAlertFeedback(
+            @RequestParam Long appointmentId,
+            @RequestParam String patientId,
+            @RequestParam String comments,
+            Authentication authentication) {
+
+        Map<String, Object> response = new HashMap<>();
+        try {
+            String email = authentication.getName();
+            Doctor doctor = (Doctor) userService.findByEmail(email);
+            Feedback feedback = feedbackService.createFeedback(patientId, doctor, comments);
+           appointmentService.UpdateFeedbackStatus(appointmentId, feedback);
+
+            response.put("success", true);
+            response.put("message", "Feedback submitted successfully.");
+        } catch (Exception e) {
+            response.put("success", false);
+            response.put("message", "Error: " + e.getMessage());
+        }
+        return response;
+    }
+
+
+    @PostMapping("/prescribe")
+    @ResponseBody
+    public Map<String, Object> createAlertPrescription(
+            @RequestParam Long appointmentId,
+            @RequestParam String patientId,
+            @RequestParam String medication,
+            @RequestParam double dosageAmount,
+            @RequestParam String dosageUnit,
+            @RequestParam String frequency,
+            @RequestParam String route,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(required = false) String instructions,
+            Authentication authentication) {
+
+        Map<String, Object> response = new HashMap<>();
+        try {
+            String email = authentication.getName();
+            Doctor doctor = (Doctor) userService.findByEmail(email);
+
+            Prescription.Dosage dosage = new Prescription.Dosage(
+                dosageAmount, dosageUnit,
+                Prescription.Frequency.valueOf(frequency),
+                route
+            );
+
+            Prescription prescription = prescriptionService.createPrescription(
+                patientId, doctor, medication,
+                dosage, startDate, endDate, instructions
+            );
+            appointmentService.UpdatePrescriptionStatus(appointmentId, prescription);
+
+            response.put("success", true);
+            response.put("message", "Prescription created successfully.");
+        } catch (Exception e) {
+            response.put("success", false);
+            response.put("message", "Failed to create prescription: " + e.getMessage());
+        }
+        return response;
+    }
+
+
 
    
 

@@ -5,7 +5,10 @@ import jakarta.validation.constraints.NotBlank;
 
 import java.time.LocalDate;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 @Entity
+@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class Prescription {
 
     @Id

@@ -7,6 +7,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 
 @Entity
+@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 @Table(name = "appointments")
 public class Appointment {
 
@@ -61,11 +62,13 @@ private Long id;
 
     // One-to-one relationship with Prescription (unidirectional)
     @OneToOne(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+        @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})  
     @JoinColumn(name = "prescription_id", referencedColumnName = "id")
     private Prescription prescription;
 
     // One-to-one relationship with Feedback (unidirectional)
     @OneToOne(cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+        @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})  
     @JoinColumn(name = "feedback_id", referencedColumnName = "id")
     private Feedback feedback;
 
