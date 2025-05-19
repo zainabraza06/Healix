@@ -99,15 +99,16 @@ public interface AppointmentRepository extends JpaRepository<Appointment, Long> 
     // Find appointment by ID and patient email
     Optional<Appointment> findByIdAndPatientEmail(Long id, String patientEmail);
     
-    // Find appointments by doctor ID (Long) and date
-    @Query("SELECT a FROM Appointment a " +
-           "WHERE a.doctor.id = :doctorId " +
-           "AND CAST(a.startTime AS date) = :date " +
-           "AND a.id != :excludeAppointmentId")
-    List<Appointment> findByDoctorIdAndDate(
-        @Param("doctorId") String doctorId, 
-        @Param("date") LocalDate date,
-        @Param("excludeAppointmentId") Long excludeAppointmentId);
+ @Query("SELECT a FROM Appointment a " +
+       "WHERE a.doctor.id = :doctorId " +
+       "AND CAST(a.startTime AS date) = :date " +
+       "AND (:excludeAppointmentId IS NULL OR a.id != :excludeAppointmentId)")
+List<Appointment> findByDoctorIdAndDate(
+    @Param("doctorId") String doctorId,  // String type for doctor ID
+    @Param("date") LocalDate date,
+    @Param("excludeAppointmentId") Long excludeAppointmentId);  // Long type for appointment ID
+
+
     
     // Check for overlapping appointments
     @Query("SELECT COUNT(a) > 0 FROM Appointment a " +

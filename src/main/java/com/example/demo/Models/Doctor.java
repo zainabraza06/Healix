@@ -4,7 +4,10 @@ import jakarta.persistence.*;
 import java.time.*;
 import java.util.*;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 @Entity
+@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 @Table(name = "Doctor")
 @PrimaryKeyJoinColumn(name = "user_id")
 public class Doctor extends User {

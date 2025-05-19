@@ -6,7 +6,9 @@ import com.example.demo.Exceptions.ResourceNotFoundException;
 import com.example.demo.Models.Appointment;
 import com.example.demo.Models.Appointment.Status;
 import com.example.demo.Models.Doctor;
+import com.example.demo.Models.Feedback;
 import com.example.demo.Models.Patient;
+import com.example.demo.Models.Prescription;
 import com.example.demo.dto.AppointmentRequestDTO;
 import com.example.demo.dto.TimeSlotDto;
 import com.example.demo.respository.AppointmentRepository;
@@ -301,11 +303,19 @@ log.info("Current status before cancellation: {}", appointment.getStatus());
         return !hasOverlap && withinWorkingHours && notDuringLunch;
     }
 
+
+
+
+
+
+
+
     public Map<String, Object> getDoctorAvailability(String doctorId, LocalDate date, 
                                                  Duration duration, String excludeAppointmentId) {
     // Fetch appointments for the doctor on the given date
     List<Appointment> appointments = appointmentRepository
         .findByDoctorIdAndDate(doctorId, date, null);
+        log.info("booked appointmetns"+ appointments.size());
 
     // Exclude the appointment if the ID is provided
     if (excludeAppointmentId != null && !excludeAppointmentId.isBlank()) {
@@ -326,6 +336,8 @@ log.info("Current status before cancellation: {}", appointment.getStatus());
 
     // Calculate available slots
     List<TimeSlotDto> availableSlots = calculateAvailableSlots(date, duration, occupiedSlots);
+    log.info("occupied" +occupiedSlots.size());
+    log.info("avaliable" +availableSlots.size());
 
     // Return the results
     Map<String, Object> response = new HashMap<>();
@@ -607,33 +619,28 @@ public List<Appointment> getFutureOnlineAppointments(Doctor doctor, LocalDateTim
         Appointment appointment = appointmentRepository.findById(appointmentId)
                 .orElseThrow(() -> new RuntimeException("Appointment not found"));
 
-        if (!appointment.getDoctor().equals(doctor)) {
-            throw new RuntimeException("Not authorized to complete this appointment");
-        }
-
-        if (appointment.getStartTime().isAfter(LocalDateTime.now())) {
-            throw new RuntimeException("Cannot complete future appointments");
-        }
-
-        if (appointment.getStatus() == Appointment.Status.COMPLETED) {
-            throw new RuntimeException("Appointment already completed");
-        }
-
-        // Check if prescription exists
-        if (appointment.getPrescription()!=null) {
-            throw new RuntimeException("Prescription required before completing");
-        }
-
-        // Check if feedback exists
-        if (appointment.getPrescription()!=null) {
-            throw new RuntimeException("Feedback required before completing");
-        }
-
         appointment.setStatus(Appointment.Status.COMPLETED);
         Appointment savedAppointment = appointmentRepository.save(appointment);
 
 
         return savedAppointment;
+    }
+
+
+
+       public Appointment UpdatePrescriptionStatus(Long id, Prescription prescription){
+
+        Appointment appointment =appointmentRepository.findById(id).orElseThrow(()-> new IllegalArgumentException( "Not Found Appointment for Id"));
+         appointment.setPrescription(prescription);
+        return appointmentRepository.save(appointment);
+    }
+
+    
+    
+    public Appointment UpdateFeedbackStatus(Long id, Feedback feedback){
+ Appointment appointment =appointmentRepository.findById(id).orElseThrow(()-> new IllegalArgumentException( "Not Found Appoitment for Id"));
+        appointment.setFeedback(feedback);
+           return appointmentRepository.save(appointment);
     }
 
 }
