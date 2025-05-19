@@ -60,3 +60,10 @@ A comprehensive Spring Boot-based web application for remote health tracking, de
    ```bash
    git clone https://github.com/zainabraza06/Remote_HealthCare_Management_System.git
    cd rhms
+
+  2.**Demo Video**
+
+  https://www.loom.com/share/4d184fce64f54482bd406a345243a193?sid=3a60ace2-61aa-466f-9a6f-5468f95e5c4c (Admin Functionalites)
+  https://www.loom.com/share/752536785ae2493eb799b1b4a42bc441?sid=7f8089b4-a87b-4817-9ac9-7592cbb5ed59 (Patient registration and Vital Upload)
+  
+**
