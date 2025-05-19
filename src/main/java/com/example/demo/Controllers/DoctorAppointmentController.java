@@ -6,7 +6,6 @@ import com.example.demo.Service.AppointmentService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Controller;
@@ -14,14 +13,13 @@ import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 import com.example.demo.Service.UserService;
-import com.example.demo.Service.PrescriptionService;
-import com.example.demo.Service.FeedbackService;
+
 import com.example.demo.Service.ReportService;
 
 import java.util.Map;
 
 import java.time.LocalDateTime;
-import java.time.LocalDate;
+
 
 import java.util.List;
 
@@ -31,13 +29,7 @@ public class DoctorAppointmentController {
 
     @Autowired
     private AppointmentService appointmentService;
-    @Autowired
-    private  PrescriptionService prescriptionService;
-
-
-    @Autowired
-    private  FeedbackService feedbackService;
-
+  
     @Autowired
     private UserService userService;
 

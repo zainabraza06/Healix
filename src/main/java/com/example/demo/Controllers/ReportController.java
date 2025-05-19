@@ -43,20 +43,22 @@ public class ReportController {
         this.userService=userService;
     }
 
-    @GetMapping
-    public String viewReports(Authentication authentication, Model model) {
-          String email = authentication.getName();
-            Patient patient = (Patient) userService.findByEmail(email);
-        List<Report> vitalReports = reportService.getVitalReportsForPatient(patient);
-        List<Report> appointmentReports = reportService.getAppointmentReportsForPatient(patient);
-        model.addAttribute("Math", Math.class);
-        
-        model.addAttribute("vitalReports", vitalReports);
-        model.addAttribute("appointmentReports", appointmentReports);
-        model.addAttribute("patient", patient);
-        
-        return "patient/Report";
-    }
+  @GetMapping
+public String viewReports(Authentication authentication, Model model) {
+    String email = authentication.getName();
+    Patient patient = (Patient) userService.findByEmail(email);
+    List<Report> vitalReports = reportService.getVitalReportsForPatient(patient);
+    List<Report> appointmentReports = reportService.getAppointmentReportsForPatient(patient);
+    List<Report> alertReports = reportService.getAlertReportsForPatient(patient); // Add this line
+    
+    model.addAttribute("Math", Math.class);
+    model.addAttribute("vitalReports", vitalReports);
+    model.addAttribute("appointmentReports", appointmentReports);
+    model.addAttribute("alertReports", alertReports); // Add this line
+    model.addAttribute("patient", patient);
+    
+    return "patient/Report";
+}
 
     @GetMapping("/download/vital/{id}")
     public ResponseEntity<Resource> downloadVitalReport(@PathVariable Long id, 
@@ -198,4 +200,69 @@ public class ReportController {
             throw new RuntimeException("Failed to generate PDF", e);
         }
     }
+
+
+
+    @GetMapping("/download/alert/{id}")
+public ResponseEntity<Resource> downloadAlertReport(@PathVariable Long id, 
+                                                  Authentication authentication, Model model) {
+    String email = authentication.getName();
+    model.addAttribute("Math", Math.class);
+    Patient patient = (Patient) userService.findByEmail(email);
+    
+    Report report = reportRepository.findById(id)
+            .orElseThrow(() -> new IllegalArgumentException("Report not found"));
+    
+    if (report.getAlert() == null || 
+        !report.getAlert().getPatient().getUserId().equals(patient.getUserId())) {
+        throw new AccessDeniedException("You are not authorized to access this report");
+    }
+    
+    Alert alert = report.getAlert();
+    Patient reportPatient = alert.getPatient();
+    Doctor doctor = alert.getDoctor();
+    Prescription prescription = report.getPrescription();
+    Feedback feedback = report.getFeedback();
+    
+    String htmlContent = generateAlertReportHtml(
+        report,
+        alert,
+        reportPatient,
+        doctor,
+        prescription,
+        feedback
+    );
+    
+    byte[] pdfBytes = generatePdfFromHtml(htmlContent);
+    String filename = String.format(
+        "Alert_Report_%s_%s.pdf", 
+        reportPatient.getLastName(), 
+        report.getCreatedAt().toLocalDate()
+    );
+    
+    return ResponseEntity.ok()
+            .contentType(MediaType.APPLICATION_PDF)
+            .header(
+                HttpHeaders.CONTENT_DISPOSITION, 
+                "attachment; filename=\"" + filename + "\""
+            )
+            .body(new ByteArrayResource(pdfBytes));
+}
+
+private String generateAlertReportHtml(Report report, 
+                                     Alert alert,
+                                     Patient patient,
+                                     Doctor doctor,
+                                     Prescription prescription,
+                                     Feedback feedback) {
+    Context context = new Context();
+    context.setVariable("report", report);
+    context.setVariable("alert", alert);
+    context.setVariable("patient", patient);
+    context.setVariable("doctor", doctor);
+    context.setVariable("prescription", prescription);
+    context.setVariable("feedback", feedback);
+    
+    return templateEngine.process("pdf/alert-report-full", context);
+}
 }

@@ -12,4 +12,7 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
     List<Report> findByVitalSignsPatientUserId(String userId);
     List<Report> findByAppointmentPatientUserId(String userId);
      List<Report> findByPatient(Patient patient);
+
+
+     List<Report> findByPatientAndAlertIsNotNull(Patient patient);
 }

@@ -2,7 +2,7 @@
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:th="http://www.thymeleaf.org">
 <head>
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-    <title>Complete Appointment Report</title>
+    <title>Medical Alert Report</title>
     <style type="text/css">
         /* Professional medical report styling */
         body { font-family: 'Arial', sans-serif; margin: 2cm; }
@@ -29,11 +29,12 @@
         .detail-table td { padding: 8px 10px; border-bottom: 1px solid #eee; }
         .signature-area { margin-top: 2cm; }
         .footer { margin-top: 1.5cm; font-size: 9pt; text-align: center; color: #95a5a6; }
+        .urgent { color: #e74c3c; font-weight: bold; }
     </style>
 </head>
 <body>
     <div class="header">
-        <div class="title">APPOINTMENT SUMMARY REPORT</div>
+        <div class="title">MEDICAL ALERT REPORT</div>
         <div class="subtitle">HealthTrack Pro Medical System</div>
     </div>
 
@@ -43,78 +44,73 @@
         <table class="detail-table">
             <tr>
                 <th width="30%">Patient Name</th>
-                <td th:text="${patient.firstName + ' ' + patient.lastName}">John Doe</td>
+                <td th:text="${patient.firstName + ' ' + patient.lastName}">Sample Name</td>
             </tr>
             <tr>
                 <th>Date of Birth</th>
-                <td th:text="${#temporals.format(patient.dateOfBirth, 'MMMM d, yyyy')}">January 1, 1980</td>
+                <td th:text="${#temporals.format(patient.dateOfBirth, 'MMMM d, yyyy')}">January 1, 1970</td>
             </tr>
             <tr>
                 <th>Patient ID</th>
-                <td th:text="${patient.userId}">PT12345</td>
+                <td th:text="${patient.userId}">12345</td>
             </tr>
         </table>
     </div>
 
-    <!-- Appointment Details Section -->
+    <!-- Alert Details Section -->
     <div class="section">
-        <div class="section-title">APPOINTMENT DETAILS</div>
+        <div class="section-title">ALERT DETAILS</div>
         <table class="detail-table">
             <tr>
-                <th width="30%">Appointment Date</th>
-                <td th:text="${#temporals.format(appointment.startTime, 'MMMM d, yyyy h:mm a')}">June 15, 2023 10:30 AM</td>
+                <th width="30%">Alert Date</th>
+                <td th:text="${#temporals.format(alert.timestamp, 'MMMM d, yyyy h:mm a')}">Sample Date</td>
             </tr>
             <tr>
-                <th>Duration</th>
-                <td th:text="${T(java.time.Duration).between(appointment.startTime, appointment.endTime).toMinutes() + ' minutes'}">30 minutes</td>
-            </tr>
-            <tr>
-                <th>Provider</th>
-                <td th:text="${doctor.firstName + ' ' + doctor.lastName + ' (' + doctor.specialization + ')'}">Dr. Sarah Smith (Cardiology)</td>
-            </tr>
-            <tr>
-                <th>Location</th>
-                <td th:text="${appointment.location}">Main Clinic, Room 205</td>
+                <th>Alert Type</th>
+                <td th:text="${alert.category}" th:class="${alert.category == 'URGENT' ? 'urgent' : ''}">Sample Type</td>
             </tr>
             <tr>
                 <th>Status</th>
-                <td th:text="${appointment.status}">Completed</td>
+                <td th:text="${alert.acknowledged ? 'Acknowledged' : 'Pending Review'}">Sample Status</td>
             </tr>
             <tr>
-                <th>Reason for Visit</th>
-                <td th:text="${appointment.reason}">Annual checkup</td>
+                <th>Provider</th>
+                <td th:text="${doctor != null ? doctor.firstName + ' ' + doctor.lastName + (doctor.specialization != null ? ' (' + doctor.specialization + ')' : '') : 'Not assigned'}">Sample Provider</td>
+            </tr>
+            <tr>
+                <th>Alert Message</th>
+                <td th:text="${alert.message}">Sample Message</td>
             </tr>
         </table>
     </div>
 
- 
     <!-- Prescription Section -->
     <div th:if="${prescription != null}" class="section">
         <div class="section-title">PRESCRIPTION</div>
         <table class="detail-table">
             <tr>
                 <th width="30%">Medication</th>
-                <td th:text="${prescription.medication}">Atorvastatin</td>
+                <td th:text="${prescription.medication}">Sample Medication</td>
             </tr>
             <tr>
                 <th>Dosage Amount</th>
-                <td th:text="${prescription.dosage.amount}">20</td>
+                <td th:text="${prescription.dosage.amount}">Sample Amount</td>
             </tr>
             <tr>
                 <th>Dosage Unit</th>
-                <td th:text="${prescription.dosage.unit}">mg</td>
+                <td th:text="${prescription.dosage.unit}">Sample Unit</td>
             </tr>
             <tr>
                 <th>Dosage Frequency</th>
-                <td th:text="${prescription.dosage.frequency}">Once daily</td>
+                <td th:text="${prescription.dosage.frequency}">Sample Frequency</td>
             </tr>
             <tr>
                 <th>Dosage Route</th>
-                <td th:text="${prescription.dosage.route}">Oral</td>
+                <td th:text="${prescription.dosage.route}">Sample Route</td>
             </tr>
             <tr>
                 <th>Prescribed By</th>
-                <td th:text="${doctor.firstName + ' ' + doctor.lastName}">Dr. Sarah Smith</td>
+                <td th:text="${doctor != null ? doctor.firstName + ' ' + doctor.lastName : 'N/A'}">Sample Prescriber</td>
             </tr>
         </table>
     </div>
@@ -123,16 +119,16 @@
     <div th:if="${feedback != null}" class="section">
         <div class="section-title">DOCTOR'S ASSESSMENT</div>
         <div style="border: 1px solid #eee; padding: 15px; background-color: #f8f9fa; min-height: 100px;">
-            <p th:text="${feedback.comments}">Patient is in good health. Recommended to continue current medication and schedule follow-up in 6 months.</p>
+            <p th:text="${feedback.comments}">Sample comments from doctor</p>
         </div>
-        <div style="text-align: right; margin-top: 10px;">
-            <span th:text="${doctor.firstName + ' ' + doctor.lastName}">Dr. Sarah Smith</span><br />
-            <span th:text="${doctor.specialization}">Cardiology</span>
+        <div th:if="${doctor != null}" style="text-align: right; margin-top: 10px;">
+            <span th:text="${doctor.firstName + ' ' + doctor.lastName}">Dr. Sample Name</span><br />
+            <span th:text="${doctor.specialization != null ? doctor.specialization : ''}">Sample Specialization</span>
         </div>
     </div>
 
     <div class="footer">
-        <p>Report generated on <span th:text="${#temporals.format(report.createdAt, 'MMMM d, yyyy')}">June 15, 2023</span></p>
+        <p>Report generated on <span th:text="${#temporals.format(report.createdAt, 'MMMM d, yyyy h:mm a')}">Sample Date</span></p>
         <p>© HealthTrack Pro - Confidential Medical Document</p>
     </div>
 </body>

@@ -76,8 +76,6 @@
                 <th>Blood Pressure</th>
                 <td>
                     <span th:text="${vitalSigns.bloodPressure.systolic + '/' + vitalSigns.bloodPressure.diastolic + ' mmHg'}"></span>
-                    <span th:text="'(' + vitalSigns.bloodPressure.category.description + ')'" 
-                          style="color: #e74c3c; font-weight: bold;"></span>
                 </td>
             </tr>
             <tr>
@@ -94,7 +92,7 @@
     </div>
 
     <!-- Prescription Section -->
-    <div th:if="${prescription != null}" class="section">
+     <div th:if="${prescription != null}" class="section">
         <div class="section-title">PRESCRIPTION</div>
         <table class="detail-table">
             <tr>
@@ -102,12 +100,20 @@
                 <td th:text="${prescription.medication}"></td>
             </tr>
             <tr>
-                <th>Dosage</th>
-                <td th:text="${prescription.dosage}"></td>
+                <th>Dosage Amount</th>
+                <td th:text="${prescription.dosage.amount}"></td>
             </tr>
-            <tr>
-                <th>Instructions</th>
-                <td th:text="${prescription.instructions}"></td>
+             <tr>
+                <th>Dosage Unit</th>
+                <td th:text="${prescription.dosage.unit}"></td>
+            </tr>
+             <tr>
+                <th>Dosage Frequency</th>
+                <td th:text="${prescription.dosage.frequency}"></td>
+            </tr>
+             <tr>
+                <th>Dosage Route</th>
+                <td th:text="${prescription.dosage.route}"></td>
             </tr>
             <tr>
                 <th>Prescribed By</th>

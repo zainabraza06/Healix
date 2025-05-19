@@ -36,5 +36,4 @@ public interface AlertRepository extends JpaRepository<Alert, Long> {
    List<Alert> findByDoctorAndAcknowledgedFalseOrderByTimestampDesc(Doctor doctor);
     List<Alert> findByDoctorAndAcknowledgedFalse(Doctor doctor);
     List<Alert> findByPatientAndAcknowledgedFalseOrderByTimestampDesc(Patient patient);
-
 }

@@ -12,7 +12,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import com.example.demo.Models.MedicalRecord;
-import com.example.demo.respository.MedicalRecordRepository;
+
 import java.util.List;
 import com.example.demo.Models.Patient;
 

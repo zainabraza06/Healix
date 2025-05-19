@@ -76,8 +76,11 @@ public class ReportService {
         emailService.sendAlertReportReadyNotification(report.getPatient().getEmail(),report.getPatient().getFullName(),
         alert.getDoctor().getFullName());
     }
+    
 
-
+    public List<Report> getAlertReportsForPatient(Patient patient) {
+    return reportRepository.findByPatientAndAlertIsNotNull(patient);
+}
     }
 
 
