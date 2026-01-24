@@ -26,6 +26,7 @@ import {
   changePatientStatus,
   getAllPatientsForDownload,
   formatPatientsForCSV,
+  formatPatientsForCSVWithData,
 } from '../services/adminService.js';
 import { successResponse, errorResponse } from '../utils/response.js';
 import { logSuccess, logFailure } from '../utils/logger.js';
@@ -366,12 +367,13 @@ export const downloadDoctorsController = async (req, res, next) => {
   try {
     const { format = 'csv' } = req.query;
     const data = await getAllDoctorsForDownload();
+    const filtered = data; // no filter currently applied
     const fmt = String(format).toLowerCase();
 
     if (fmt === 'json') {
       res.setHeader('Content-Type', 'application/json');
       res.setHeader('Content-Disposition', 'attachment; filename="medical_personnel.json"');
-      return res.status(200).send(JSON.stringify(data, null, 2));
+      return res.status(200).send(JSON.stringify(filtered, null, 2));
     }
 
     if (fmt === 'pdf') {
@@ -446,7 +448,7 @@ export const downloadDoctorsController = async (req, res, next) => {
       };
 
       drawRow(headerRow, true);
-      data.forEach(item => {
+      filtered.forEach(item => {
         drawRow({
           ...item,
           registeredAt: item.registeredAt ? new Date(item.registeredAt).toLocaleDateString() : 'N/A'
@@ -566,7 +568,7 @@ export const downloadPatientsController = async (req, res, next) => {
     }
 
     // CSV formatting via service
-    const csvContent = await formatPatientsForCSV();
+    const csvContent = formatPatientsForCSVWithData(filtered);
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename="patient_registry.csv"');
     return res.status(200).send(csvContent);
@@ -621,8 +623,8 @@ export const getDoctorApplicationsController = async (req, res, next) => {
  */
 export const getPaginatedPatientsController = async (req, res, next) => {
   try {
-    const { page = 0, size = 10, search = '' } = req.query;
-    const data = await getPaginatedPatients(parseInt(page), parseInt(size), search);
+    const { page = 0, size = 10, search = '', isActive } = req.query;
+    const data = await getPaginatedPatients(parseInt(page), parseInt(size), search, isActive);
     res.json(successResponse('Paginated patients retrieved successfully.', data));
   } catch (error) {
     next(error);

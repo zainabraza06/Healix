@@ -7,7 +7,7 @@ import toast from 'react-hot-toast';
 import {
   X, Search, Power,
   ArrowLeft, Loader, Activity,
-  Download, FileText, Database,
+  Download, FileText, Database, Code,
   User, Mail, Phone, MapPin, Calendar, Heart, AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -37,9 +37,8 @@ export default function AdminPatientsPage() {
   const fetchPatients = async () => {
     try {
       setIsLoading(true);
-      const response = await apiClient.get('/admin/patients', {
-        params: { page: currentPage, size: 10, search: searchTerm },
-      });
+      const isActiveParam = statusFilter === 'ALL' ? undefined : (statusFilter === 'ACTIVE' ? 'true' : 'false');
+      const response = await apiClient.getPatients(currentPage, 10, searchTerm, isActiveParam);
       if (response.success && response.data) {
         setPatients(response.data.content || []);
         setTotalPages(response.data.totalPages || 1);
@@ -56,7 +55,8 @@ export default function AdminPatientsPage() {
 
   const handleExport = async (format: 'pdf' | 'csv' | 'json') => {
     try {
-      const blob = await apiClient.downloadPatients(format);
+      const isActiveParam = statusFilter === 'ALL' ? undefined : (statusFilter === 'ACTIVE' ? 'true' : 'false');
+      const blob = await apiClient.downloadPatients(format, isActiveParam);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -134,7 +134,7 @@ export default function AdminPatientsPage() {
           </div>
 
           {/* Search & Filter Bar */}
-          <div className="glass-card p-4 mb-8 border-white/50 shadow-sm flex flex-col lg:flex-row gap-4">
+          <div className="glass-card p-4 mb-8 border-white/50 shadow-sm flex flex-col lg:flex-row gap-4 relative z-20">
             <div className="flex-1 relative">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
               <input
@@ -149,21 +149,40 @@ export default function AdminPatientsPage() {
               />
             </div>
 
-            {/* Action Buttons */}
+            {/* Filters & Action Buttons */}
             <div className="flex items-center gap-4 w-full md:w-auto">
-              <div className="relative group">
-                <button className="flex items-center gap-2 px-5 py-3 bg-white border border-slate-200 rounded-xl text-slate-600 font-bold text-sm hover:bg-slate-50 transition-all shadow-sm">
-                  <Download size={18} /> Export Data
+              <div className="flex p-1 bg-slate-100/50 rounded-xl border border-slate-200/50">
+                {['ALL', 'ACTIVE', 'DEACTIVATED'].map((filter) => (
+                  <button
+                    key={filter}
+                    onClick={() => {
+                      setStatusFilter(filter);
+                      setCurrentPage(0);
+                    }}
+                    className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${statusFilter === filter
+                      ? 'bg-white text-emerald-700 shadow-sm'
+                      : 'text-slate-400 hover:text-slate-600'
+                      }`}
+                  >
+                    {filter}
+                  </button>
+                ))}
+              </div>
+              <div className="relative group/export">
+                <button
+                  className="px-6 py-4 bg-emerald-600 text-white rounded-2xl font-black uppercase tracking-widest hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-lg shadow-emerald-500/20"
+                >
+                  <Download className="w-5 h-5" /> Export Data
                 </button>
-                <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-xl shadow-xl border border-slate-100 p-2 hidden group-hover:block z-20">
-                  <button onClick={() => handleExport('csv')} className="w-full text-left px-4 py-2 hover:bg-slate-50 rounded-lg text-sm font-medium text-slate-600 flex items-center gap-2">
-                    <FileText size={14} className="text-emerald-500" /> Export as CSV
+                <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-2xl shadow-2xl border border-slate-100 py-2 opacity-0 invisible group-hover/export:opacity-100 group-hover/export:visible transition-all z-[60]">
+                  <button onClick={() => handleExport('pdf')} className="w-full px-4 py-2.5 text-left text-sm font-bold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 transition flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-emerald-600" /> Professional PDF
                   </button>
-                  <button onClick={() => handleExport('json')} className="w-full text-left px-4 py-2 hover:bg-slate-50 rounded-lg text-sm font-medium text-slate-600 flex items-center gap-2">
-                    <Database size={14} className="text-blue-500" /> Export as JSON
+                  <button onClick={() => handleExport('csv')} className="w-full px-4 py-2.5 text-left text-sm font-bold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 transition flex items-center gap-2">
+                    <Database className="w-4 h-4 text-emerald-600" /> CSV Spreadsheet
                   </button>
-                  <button onClick={() => handleExport('pdf')} className="w-full text-left px-4 py-2 hover:bg-slate-50 rounded-lg text-sm font-medium text-slate-600 flex items-center gap-2">
-                    <FileText size={14} className="text-red-500" /> Export as PDF
+                  <button onClick={() => handleExport('json')} className="w-full px-4 py-2.5 text-left text-sm font-bold text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 transition flex items-center gap-2">
+                    <Code className="w-4 h-4 text-emerald-600" /> Data JSON
                   </button>
                 </div>
               </div>
