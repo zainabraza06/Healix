@@ -1,0 +1,5 @@
+date,time,bloodPressureSystolic,bloodPressureDiastolic,heartRate,temperature,oxygenSaturation,respiratoryRate,notes
+2026-01-24,09:00,190,125,105,103.0,88,24,Severe headache and shortness of breath
+2026-01-24,13:30,145,95,90,99.1,92,22,Feeling dizzy
+2026-01-24,18:15,85,55,58,96.0,97,10,Cold hands and fatigue
+2026-01-24,21:00,118,78,72,98.6,98,16,Evening check

@@ -14,15 +14,12 @@ export default function VitalsPage() {
   const [vitals, setVitals] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedDoctor, setSelectedDoctor] = useState<string>('');
-  const [doctors, setDoctors] = useState<any[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [showUploadForm, setShowUploadForm] = useState(false);
 
   useEffect(() => {
     fetchVitals();
-    fetchDoctors();
   }, []);
 
   const fetchVitals = async () => {
@@ -39,17 +36,6 @@ export default function VitalsPage() {
       console.error(err);
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  const fetchDoctors = async () => {
-    try {
-      const response = await apiClient.getDoctorPatients();
-      if (response.success && response.data) {
-        setDoctors(response.data.doctors || []);
-      }
-    } catch (err) {
-      console.error('Failed to fetch doctors:', err);
     }
   };
 
@@ -84,18 +70,12 @@ export default function VitalsPage() {
       return;
     }
 
-    if (!selectedDoctor) {
-      toast.error('Please select a doctor');
-      return;
-    }
-
     setIsUploading(true);
     try {
-      const response = await apiClient.uploadVitalsCSV(file, selectedDoctor);
+      const response = await apiClient.uploadVitalsCSV(file);
       if (response.success) {
         toast.success('Vitals uploaded successfully!');
         setFile(null);
-        setSelectedDoctor('');
         setShowUploadForm(false);
         fetchVitals();
       } else {
@@ -150,35 +130,16 @@ export default function VitalsPage() {
                 <form onSubmit={handleUploadCSV} className="space-y-4">
                   <h3 className="text-xl font-bold text-slate-800 mb-4">Upload Vital Signs CSV</h3>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-slate-600 mb-2">
-                        Select Doctor
-                      </label>
-                      <select
-                        value={selectedDoctor}
-                        onChange={(e) => setSelectedDoctor(e.target.value)}
-                        className="w-full px-4 py-2 bg-white/50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 backdrop-blur-sm"
-                      >
-                        <option value="">Choose a doctor</option>
-                        {doctors.map((doc) => (
-                          <option key={doc.id} value={doc.id}>
-                            Dr. {doc.firstName} {doc.lastName}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-slate-600 mb-2">
-                        Select File
-                      </label>
-                      <input
-                        type="file"
-                        accept=".csv"
-                        onChange={handleFileChange}
-                        className="w-full px-4 py-2 bg-white/50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 backdrop-blur-sm file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-emerald-100 file:text-emerald-600"
-                      />
-                    </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-600 mb-2">
+                      Select File
+                    </label>
+                    <input
+                      type="file"
+                      accept=".csv"
+                      onChange={handleFileChange}
+                      className="w-full px-4 py-2 bg-white/50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 backdrop-blur-sm file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-emerald-100 file:text-emerald-600"
+                    />
                   </div>
 
                   <div className="flex gap-3 pt-4">
@@ -226,28 +187,40 @@ export default function VitalsPage() {
                   <table className="w-full">
                     <thead className="bg-slate-50/50 border-b border-slate-200/50">
                       <tr>
-                        <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">Date</th>
+                        <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">Date & Time</th>
                         <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">Heart Rate</th>
                         <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">Blood Pressure</th>
                         <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">Oxygen Level</th>
                         <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">Temperature</th>
-                        <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">Status</th>
+                        <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">Respiratory Rate</th>
+                                                <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">Status</th>
+                        <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">Notes</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100/50">
                       {vitals.map((vital, idx) => (
                         <tr key={idx} className="hover:bg-white/40 transition-colors">
                           <td className="px-6 py-4 text-sm text-slate-700">
-                            {new Date(vital.timestamp).toLocaleDateString()}
+                            {new Date(vital.recorded_at || vital.timestamp).toLocaleString()}
                           </td>
                           <td className="px-6 py-4 text-sm text-slate-600">{vital.heartRate} bpm</td>
-                          <td className="px-6 py-4 text-sm text-slate-600">{vital.bloodPressure}</td>
+                          <td className="px-6 py-4 text-sm text-slate-600">
+                            {vital.systolicBP}/{vital.diastolicBP}
+                          </td>
                           <td className="px-6 py-4 text-sm text-slate-600">{vital.oxygenLevel}%</td>
-                          <td className="px-6 py-4 text-sm text-slate-600">{vital.temperature}°C</td>
-                          <td className="px-6 py-4">
-                            <span className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700">
-                              Normal
-                            </span>
+                          <td className="px-6 py-4 text-sm text-slate-600">{vital.temperature}°F</td>
+                          <td className="px-6 py-4 text-sm text-slate-600">{vital.respiratoryRate} /min</td>
+                                                    <td className="px-6 py-4">
+                                                      <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
+                                                        vital.status === 'CRITICAL' 
+                                                          ? 'bg-red-100 text-red-700 border border-red-300' 
+                                                          : 'bg-emerald-100 text-emerald-700 border border-emerald-300'
+                                                      }`}>
+                                                        {vital.status || 'NORMAL'}
+                                                      </span>
+                                                    </td>
+                          <td className="px-6 py-4 text-sm text-slate-500 italic">
+                            {vital.notes || '-'}
                           </td>
                         </tr>
                       ))}

@@ -7,7 +7,7 @@ import ProtectedLayout from '@/components/ProtectedLayout';
 import {
     Loader, Activity, Calendar, AlertCircle,
     Plus, History, Shield, Info, Clipboard,
-    Heart, Thermometer, User, Hospital
+    Heart, Thermometer, User, Building2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import dynamic from 'next/dynamic';
@@ -313,7 +313,7 @@ function SurgeryList({ data }: { data: any[] }) {
     return (
         <div className="glass-card p-8 border-white/40 min-h-[400px]">
             <h2 className="text-2xl font-black text-slate-800 mb-8 flex items-center gap-2">
-                <Hospital className="w-6 h-6 text-emerald-500" /> Surgical History
+                <Building2 className="w-6 h-6 text-emerald-500" /> Surgical History
             </h2>
             {data.length === 0 ? <NoData text="No operations recorded." /> : (
                 <div className="space-y-4">

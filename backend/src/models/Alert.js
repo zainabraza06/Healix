@@ -33,6 +33,7 @@ const alertSchema = new mongoose.Schema(
       enum: ['ACTIVE', 'RESOLVED', 'ACKNOWLEDGED'],
       default: 'ACTIVE',
     },
+    expires_at: Date,
     resolved_at: Date,
     resolved_by: {
       type: mongoose.Schema.Types.ObjectId,

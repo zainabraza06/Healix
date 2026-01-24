@@ -165,16 +165,20 @@ class ApiClient {
     return response.data;
   }
 
-  async uploadVitalsCSV(file: File, doctorId: string): Promise<ApiResponse<any>> {
+  async uploadVitalsCSV(file: File): Promise<ApiResponse<any>> {
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('doctorId', doctorId);
 
     const response = await this.client.post('/patient/vitals/upload-csv', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
     });
+    return response.data;
+  }
+
+  async notifyDoctorForCriticalVitals(doctorId: string): Promise<ApiResponse<any>> {
+    const response = await this.client.post('/patient/vitals/consultation-notify', { doctorId });
     return response.data;
   }
 
@@ -192,6 +196,17 @@ class ApiClient {
 
   async createEmergencyAlert(data: any): Promise<ApiResponse<any>> {
     const response = await this.client.post('/patient/alert/emergency', data);
+    return response.data;
+  }
+
+  // Chat (Patient)
+  async getPatientChatHistory(doctorId: string): Promise<ApiResponse<any[]>> {
+    const response = await this.client.get(`/chat/patient/${doctorId}/history`);
+    return response.data;
+  }
+
+  async sendPatientChatMessage(doctorId: string, text: string): Promise<ApiResponse<any>> {
+    const response = await this.client.post(`/chat/patient/${doctorId}/message`, { text });
     return response.data;
   }
 
@@ -404,6 +419,17 @@ class ApiClient {
 
   async updateAdminProfile(data: any): Promise<ApiResponse<any>> {
     const response = await this.client.put('/admin/profile', data);
+    return response.data;
+  }
+
+  // Chat (Doctor)
+  async getDoctorChatHistory(patientId: string): Promise<ApiResponse<any[]>> {
+    const response = await this.client.get(`/chat/doctor/${patientId}/history`);
+    return response.data;
+  }
+
+  async sendDoctorChatMessage(patientId: string, text: string): Promise<ApiResponse<any>> {
+    const response = await this.client.post(`/chat/doctor/${patientId}/message`, { text });
     return response.data;
   }
 }

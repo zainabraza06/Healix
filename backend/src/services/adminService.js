@@ -396,6 +396,12 @@ export const formatPatientsForCSVWithData = (data) => {
  */
 export const registerDoctorAsAdmin = async (data) => {
   const {
+    firstName,
+    lastName,
+    email,
+    password,
+    phoneNumber,
+    licenseNumber,
     specialization,
     qualifications,
     yearsOfExperience,
