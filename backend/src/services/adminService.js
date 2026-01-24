@@ -366,6 +366,31 @@ export const formatPatientsForCSV = async () => {
   return csv;
 };
 
+// Format patients for CSV using provided data (filtered)
+export const formatPatientsForCSVWithData = (data) => {
+  const headers = ['id', 'fullName', 'email', 'phone', 'bloodType', 'gender', 'dob', 'address', 'isActive', 'registeredAt'];
+  const rows = (data || []).map((p) => [
+    p.id,
+    p.fullName,
+    p.email,
+    p.phone,
+    p.bloodType,
+    p.gender,
+    p.dob,
+    p.address,
+    p.isActive,
+    p.registeredAt ? new Date(p.registeredAt).toISOString() : '',
+  ]);
+  const csv = [headers.join(','), ...rows.map((r) => r.map((v) => {
+    const s = v == null ? '' : String(v);
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  }).join(','))].join('\n');
+  return csv;
+};
+
 /**
  * Admin-direct doctor registration (skips application workflow)
  */
@@ -449,7 +474,7 @@ export const registerDoctorAsAdmin = async (data) => {
 /**
  * Get paginated patients
  */
-export const getPaginatedPatients = async (page = 0, size = 10, search = '') => {
+export const getPaginatedPatients = async (page = 0, size = 10, search = '', isActiveFilter) => {
   try {
     const query = search
       ? {
@@ -466,12 +491,18 @@ export const getPaginatedPatients = async (page = 0, size = 10, search = '') => 
       .lean();
 
     // Correctly filter by full_name and email
-    const filteredPatients = search
+    let filteredPatients = search
       ? patients.filter(p =>
         p.user_id?.full_name?.toLowerCase().includes(search.toLowerCase()) ||
         p.user_id?.email?.toLowerCase().includes(search.toLowerCase())
       )
       : patients;
+
+    // Optional filter by active/deactivated
+    if (typeof isActiveFilter !== 'undefined' && isActiveFilter !== null && isActiveFilter !== '') {
+      const activeBool = String(isActiveFilter).toLowerCase() === 'true' || String(isActiveFilter).toLowerCase() === 'active';
+      filteredPatients = filteredPatients.filter(p => (p.user_id?.is_active ?? false) === activeBool);
+    }
 
     const totalElements = filteredPatients.length;
     const totalPages = Math.ceil(totalElements / size);

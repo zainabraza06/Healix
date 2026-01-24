@@ -301,11 +301,12 @@ class ApiClient {
     return response.data;
   }
 
-  async getPatients(page: number = 0, size: number = 10, search?: string): Promise<ApiResponse<PaginatedResponse<any>>> {
+  async getPatients(page: number = 0, size: number = 10, search?: string, isActive?: 'true' | 'false' | 'active' | 'deactivated'): Promise<ApiResponse<PaginatedResponse<any>>> {
     const params = new URLSearchParams({
       page: page.toString(),
       size: size.toString(),
       ...(search && { search }),
+      ...(isActive && { isActive }),
     });
     const response = await this.client.get(`/admin/patients?${params}`);
     return response.data;
@@ -371,8 +372,9 @@ class ApiClient {
     return response.data as Blob;
   }
 
-  async downloadPatients(format: 'csv' | 'json' | 'pdf' = 'csv'): Promise<Blob> {
-    const response = await this.client.get(`/admin/patients/download?format=${format}`, {
+  async downloadPatients(format: 'csv' | 'json' | 'pdf' = 'csv', isActive?: 'true' | 'false' | 'active' | 'deactivated'): Promise<Blob> {
+    const params = new URLSearchParams({ format, ...(isActive && { isActive }) });
+    const response = await this.client.get(`/admin/patients/download?${params.toString()}`, {
       responseType: 'blob',
     });
     return response.data as Blob;
