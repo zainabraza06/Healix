@@ -34,6 +34,11 @@ const vitalsSchema = new mongoose.Schema(
         notes: {
             type: String,
             trim: true,
+                status: {
+                    type: String,
+                    enum: ['NORMAL', 'CRITICAL'],
+                    default: 'NORMAL',
+                },
         },
         recorded_at: {
             type: Date,

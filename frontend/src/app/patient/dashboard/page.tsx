@@ -4,7 +4,9 @@ import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/lib/authStore';
 import { apiClient } from '@/lib/apiClient';
 import ProtectedLayout from '@/components/ProtectedLayout';
-import { Loader, AlertCircle, Activity, TrendingUp, Users, Clock, Lock, Heart, Thermometer, Droplets } from 'lucide-react';
+import { Loader, AlertCircle, Activity, TrendingUp, Users, Clock, Lock, Heart, Thermometer, Droplets, X, MessageSquare } from 'lucide-react';
+import { connectSocket, joinRooms, onChatReceive, offChatReceive } from '@/lib/socket';
+import { useRouter } from 'next/navigation';
 import ChangePasswordModal from '@/components/ChangePasswordModal';
 import toast from 'react-hot-toast';
 import dynamic from 'next/dynamic';
@@ -19,10 +21,16 @@ const FloatingIcons = dynamic(() => import('@/components/canvas/FloatingIcons').
 
 export default function PatientDashboard() {
   const { user } = useAuthStore();
+  const router = useRouter();
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
+  const [showDoctorSelect, setShowDoctorSelect] = useState(false);
+  const [doctors, setDoctors] = useState<any[]>([]);
+  const [selectedDoctor, setSelectedDoctor] = useState('');
+  const [expandedAlert, setExpandedAlert] = useState<string | null>(null);
 
   // Interactive Vitals States
   const [timeframe, setTimeframe] = useState<7 | 30 | 90>(30);
@@ -33,6 +41,29 @@ export default function PatientDashboard() {
       fetchDashboardData();
     }
   }, [user]);
+
+  // Initialize socket and join patient room when dashboard data is available
+  useEffect(() => {
+    if (user && dashboardData?.patient?._id) {
+      const socket = connectSocket(localStorage.getItem('token') || undefined);
+      joinRooms({ role: 'PATIENT', patientId: dashboardData.patient._id, userId: user.id });
+
+      const handleChat = (payload: any) => {
+        // Basic toast for incoming chat; can be replaced with UI later
+        toast.custom((t) => (
+          <div className="glass-card p-4 border border-slate-200">
+            <p className="font-bold text-slate-800">New message</p>
+            <p className="text-slate-600 text-sm">{payload?.message?.text || 'Message received'}</p>
+          </div>
+        ));
+      };
+      onChatReceive(handleChat);
+
+      return () => {
+        offChatReceive(handleChat);
+      };
+    }
+  }, [user, dashboardData?.patient?._id]);
 
   useEffect(() => {
     if (user && dashboardData) { // Only fetch history if dashboardData is already loaded
@@ -75,6 +106,41 @@ export default function PatientDashboard() {
       }
     } catch (error) {
       console.error('History fetch failed:', error);
+    }
+  };
+
+  const fetchDoctors = async () => {
+    try {
+      const response = await apiClient.getAvailableDoctors();
+      if (response.success && response.data) {
+        setDoctors(response.data || []);
+      }
+    } catch (error) {
+      // Fallback to any doctors present in dashboard data
+      if (dashboardData?.doctors) {
+        setDoctors(dashboardData.doctors);
+      } else {
+        console.error('Failed to fetch doctors', error);
+      }
+    }
+  };
+
+  const notifyDoctor = async () => {
+    if (!selectedDoctor) return;
+    try {
+      const res = await apiClient.notifyDoctorForCriticalVitals(selectedDoctor);
+      if (res.success) {
+        toast.success('Doctor notified! Opening chat...');
+        setShowDoctorSelect(false);
+        // Redirect to chat after brief delay
+        setTimeout(() => {
+          router.push(`/patient/chat/${selectedDoctor}`);
+        }, 500);
+      } else {
+        toast.error(res.message || 'Failed to notify doctor');
+      }
+    } catch (error) {
+      toast.error('Failed to notify doctor');
     }
   };
 
@@ -128,6 +194,192 @@ export default function PatientDashboard() {
               <div>
                 <p className="font-medium text-red-900">Error</p>
                 <p className="text-red-700 text-sm">{error}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Critical Vitals Alert - Compact Inline */}
+          {dashboardData?.alerts && dashboardData.alerts.filter((alert: any) => 
+            alert.category === 'CRITICAL' && !dismissedAlerts.has(alert.id)
+          ).map((alert: any) => {
+            const messageLines = alert.message.split('\n').filter((line: string) => line.trim());
+            const issuesLine = messageLines.find((l: string) => l.includes('Issues:'));
+            const issues = issuesLine ? issuesLine.replace('Issues: ', '').split('; ').slice(0, 2) : [];
+            
+            return (
+            <motion.div
+              key={alert.id}
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              onClick={() => setExpandedAlert(alert.id)}
+              className="mb-6 p-4 bg-red-50 border border-red-300 rounded-lg shadow-md cursor-pointer hover:shadow-lg hover:bg-red-100 transition-all"
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex items-start gap-3 flex-1">
+                  <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5 animate-pulse" />
+                  <div>
+                    <p className="font-bold text-red-900 text-sm">🔴 Critical Vitals Alert</p>
+                    <p className="text-xs text-red-700 mt-1">
+                      {issues.slice(0, 1).map(i => i.trim()).join(', ')}
+                      {issues.length > 1 && ` + ${issues.length} more`}
+                    </p>
+                    <p className="text-xs text-red-600 mt-0.5">Click to view details</p>
+                  </div>
+                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDismissedAlerts(prev => new Set(prev).add(alert.id));
+                  }}
+                  className="p-1 hover:bg-red-200 rounded transition-colors flex-shrink-0"
+                >
+                  <X className="w-4 h-4 text-red-600" />
+                </button>
+              </div>
+            </motion.div>
+            );
+          })}
+
+          {/* Alert Details Modal */}
+          {expandedAlert && dashboardData?.alerts && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <div 
+                className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+                onClick={() => setExpandedAlert(null)}
+              ></div>
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="relative bg-white rounded-2xl p-6 w-full max-w-lg shadow-2xl"
+              >
+                {(() => {
+                  const alert = dashboardData.alerts.find((a: any) => a.id === expandedAlert);
+                  if (!alert) return null;
+                  
+                  // Check if alert is within 24 hours
+                  const createdTime = new Date(alert.timestamp).getTime();
+                  const now = new Date().getTime();
+                  const hoursOld = (now - createdTime) / (1000 * 60 * 60);
+                  const isWithin24h = hoursOld < 24;
+                  
+                  const msg = alert.message || '';
+                  const lines = msg.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+                  
+                  // Issues are on the line after title (line 1)
+                  let issues: string[] = [];
+                  if (lines.length > 1) {
+                    const issuesLine = lines[1];
+                    if (!issuesLine.includes('RECOMMENDATIONS')) {
+                      issues = issuesLine.split(',').map(i => i.trim()).filter(i => i.length > 0);
+                    }
+                  }
+                  
+                  // Recommendations start after "RECOMMENDATIONS:\" line (only show if within 24h)
+                  let recs: string[] = [];
+                  if (isWithin24h) {
+                    const recsStartIdx = lines.findIndex(l => l.includes('RECOMMENDATIONS'));
+                    if (recsStartIdx !== -1 && recsStartIdx < lines.length - 1) {
+                      recs = lines.slice(recsStartIdx + 1).filter(r => r.length > 0);
+                    }
+                  }
+                  
+                  return (
+                    <>
+                      <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-lg font-black text-slate-800">Alert Details</h2>
+                        <button onClick={() => setExpandedAlert(null)} className="p-1 hover:bg-slate-100 rounded">
+                          <X className="w-5 h-5 text-slate-600" />
+                        </button>
+                      </div>
+                      
+                      <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+                        {/* Issues */}
+                        {issues.length > 0 ? (
+                          <div>
+                            <p className="font-bold text-red-900 text-sm mb-2">🔴 Critical Issues:</p>
+                            <div className="space-y-2 bg-red-50 p-3 rounded-lg border border-red-200">
+                              {issues.map((issue: string, i: number) => (
+                                <p key={i} className="text-sm text-red-800 leading-relaxed">
+                                  • {issue}
+                                </p>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {/* Recommendations (only within 24h) */}
+                        {isWithin24h && recs.length > 0 && (
+                          <div>
+                            <p className="font-bold text-orange-900 text-sm mb-2">💡 What to Do:</p>
+                            <div className="space-y-2 bg-orange-50 p-3 rounded-lg border border-orange-200">
+                              {recs.map((rec: string, i: number) => (
+                                <p key={i} className="text-sm text-orange-800 leading-relaxed">
+                                  • {rec}
+                                </p>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Alert Age Warning */}
+                        {!isWithin24h && (
+                          <div className="p-3 bg-slate-100 border border-slate-300 rounded-lg">
+                            <p className="text-xs text-slate-700">
+                              ℹ️ This alert is older than 24 hours. Consultation is no longer available.
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Actions */}
+                        <div className="flex gap-2 pt-4 border-t">
+                          {isWithin24h && (
+                            <button
+                              onClick={() => {
+                                setExpandedAlert(null);
+                                setShowDoctorSelect(true);
+                                fetchDoctors();
+                              }}
+                              className="flex-1 px-4 py-2 bg-red-600 text-white text-sm font-bold rounded-lg hover:bg-red-700 transition-all"
+                            >
+                              Consult Doctor
+                            </button>
+                          )}
+                          <button
+                            onClick={() => setExpandedAlert(null)}
+                            className={`${isWithin24h ? 'flex-1' : 'w-full'} px-4 py-2 bg-slate-200 text-slate-800 text-sm font-bold rounded-lg hover:bg-slate-300 transition-all`}
+                          >
+                            Close
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
+              </motion.div>
+            </div>
+          )}
+
+          {/* Doctor Selection Modal */}
+          {showDoctorSelect && (
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
+              <div className="glass-card p-6 w-full max-w-md">
+                <h3 className="text-xl font-black text-slate-800 mb-4">Select a Doctor</h3>
+                <select
+                  value={selectedDoctor}
+                  onChange={(e) => setSelectedDoctor(e.target.value)}
+                  className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl mb-4"
+                >
+                  <option value="">Choose a doctor</option>
+                  {doctors.map((doc) => (
+                    <option key={doc.id || doc._id} value={doc.id || doc._id}>
+                      Dr. {doc.firstName || doc.user_id?.full_name} {doc.lastName || ''}
+                    </option>
+                  ))}
+                </select>
+                <div className="flex gap-3">
+                  <button onClick={() => setShowDoctorSelect(false)} className="px-5 py-2 bg-slate-200 rounded-xl">Cancel</button>
+                  <button onClick={notifyDoctor} className="px-5 py-2 bg-emerald-600 text-white rounded-xl">Notify</button>
+                </div>
               </div>
             </div>
           )}
@@ -258,28 +510,38 @@ export default function PatientDashboard() {
                 {/* Alerts Section */}
                 <div className="lg:col-span-2">
                   <div className="glass-panel p-6">
-                    <h2 className="text-xl font-bold text-slate-800 mb-4">Recent Alerts</h2>
+                    <div className="flex items-center justify-between mb-4">
+                      <h2 className="text-xl font-bold text-slate-800">Recent Alerts</h2>
+                      {dashboardData.alerts && dashboardData.alerts.length > 5 && (
+                        <button onClick={() => router.push('/patient/alerts')} className="text-xs font-bold text-emerald-600 hover:text-emerald-700 px-3 py-1 border border-emerald-200 rounded-lg hover:bg-emerald-50 transition-all">
+                          View All
+                        </button>
+                      )}
+                    </div>
                     {dashboardData.alerts && dashboardData.alerts.length > 0 ? (
-                      <div className="space-y-4">
+                      <div className="space-y-2">
                         {dashboardData.alerts.slice(0, 5).map((alert: any) => (
                           <div
                             key={alert.id}
-                            className={`p-4 rounded-xl border-l-4 backdrop-blur-sm ${alert.category === 'CRITICAL'
-                              ? 'bg-red-50/50 border-red-500'
+                            onClick={() => setExpandedAlert(alert.id)}
+                            className={`p-3 rounded-lg border-l-4 backdrop-blur-sm cursor-pointer hover:shadow-md transition-all ${alert.category === 'CRITICAL'
+                              ? 'bg-red-50/50 border-red-500 hover:bg-red-100/50'
                               : alert.category === 'WARNING'
-                                ? 'bg-amber-50/50 border-amber-500'
-                                : 'bg-blue-50/50 border-blue-500'
+                                ? 'bg-amber-50/50 border-amber-500 hover:bg-amber-100/50'
+                                : 'bg-blue-50/50 border-blue-500 hover:bg-blue-100/50'
                               }`}
                           >
                             <div className="flex justify-between items-start">
-                              <div>
-                                <p className="font-medium text-slate-800">{alert.message}</p>
-                                <p className="text-sm text-slate-500 mt-1">
+                              <div className="flex-1">
+                                <p className="font-medium text-slate-800 text-sm">
+                                  {alert.category === 'CRITICAL' ? '🔴' : alert.category === 'WARNING' ? '⚠️' : 'ℹ️'} {alert.message.split('\n')[0]}
+                                </p>
+                                <p className="text-xs text-slate-500 mt-1">
                                   {new Date(alert.timestamp).toLocaleString()}
                                 </p>
                               </div>
                               <span
-                                className={`px-3 py-1 rounded-full text-xs font-semibold ${alert.category === 'CRITICAL'
+                                className={`px-2 py-1 rounded text-xs font-semibold whitespace-nowrap ml-2 ${alert.category === 'CRITICAL'
                                   ? 'bg-red-200 text-red-800'
                                   : alert.category === 'WARNING'
                                     ? 'bg-amber-200 text-amber-800'
@@ -324,8 +586,8 @@ export default function PatientDashboard() {
               </div>
 
               {/* Quick Actions */}
-              <div className="mt-8 grid md:grid-cols-3 gap-4">
-                <button className="glass-card p-4 hover:bg-white/60 transition text-center group">
+              <div className="mt-8 grid md:grid-cols-4 gap-4">
+                <button onClick={() => router.push('/patient/vitals')} className="glass-card p-4 hover:bg-white/60 transition text-center group">
                   <Activity className="w-6 h-6 text-blue-600 mx-auto mb-2 group-hover:scale-110 transition-transform" />
                   <p className="font-semibold text-slate-800">Upload Vitals</p>
                   <p className="text-xs text-slate-500">Share vital signs data</p>
@@ -334,6 +596,11 @@ export default function PatientDashboard() {
                   <Clock className="w-6 h-6 text-emerald-600 mx-auto mb-2 group-hover:scale-110 transition-transform" />
                   <p className="font-semibold text-slate-800">Book Appointment</p>
                   <p className="text-xs text-slate-500">Schedule with a doctor</p>
+                </button>
+                <button className="glass-card p-4 hover:bg-white/60 transition text-center group">
+                  <MessageSquare className="w-6 h-6 text-purple-600 mx-auto mb-2 group-hover:scale-110 transition-transform" />
+                  <p className="font-semibold text-slate-800">Messages</p>
+                  <p className="text-xs text-slate-500">Chat with doctors</p>
                 </button>
                 <button className="glass-card p-4 hover:bg-white/60 transition text-center group">
                   <AlertCircle className="w-6 h-6 text-red-600 mx-auto mb-2 group-hover:scale-110 transition-transform" />

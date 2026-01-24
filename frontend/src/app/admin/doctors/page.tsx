@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import { apiClient } from '@/lib/apiClient';
 import ProtectedLayout from '@/components/ProtectedLayout';
 import toast from 'react-hot-toast';
@@ -21,6 +21,22 @@ export default function AdminDoctorsPage() {
   const [currentPage, setCurrentPage] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [showRegisterForm, setShowRegisterForm] = useState(false);
+  const [registerForm, setRegisterForm] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    password: '',
+    phoneNumber: '',
+    licenseNumber: '',
+    specialization: '',
+    qualifications: '',
+    yearsOfExperience: '',
+    emergencyContactName: '',
+    emergencyContactPhone: '',
+    emergencyContactEmail: '',
+    emergencyContactRelationship: '',
+  });
+  const [registerLoading, setRegisterLoading] = useState(false);
 
   // Status Change Management State
   const [showStatusModal, setShowStatusModal] = useState(false);
@@ -49,7 +65,52 @@ export default function AdminDoctorsPage() {
     }
   };
 
-  // ... (registerFormData same)
+  const handleRegisterChange = (field: string, value: string) => {
+    setRegisterForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleRegisterSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!registerForm.firstName || !registerForm.lastName || !registerForm.email || !registerForm.password || !registerForm.licenseNumber) {
+      toast.error('First name, last name, email, password, and license are required');
+      return;
+    }
+
+    try {
+      setRegisterLoading(true);
+      const payload = {
+        ...registerForm,
+        yearsOfExperience: registerForm.yearsOfExperience ? Number(registerForm.yearsOfExperience) : 0,
+      };
+      const res = await apiClient.registerDoctorAsAdmin(payload);
+      if (res.success) {
+        toast.success('Doctor registered successfully');
+        setRegisterForm({
+          firstName: '',
+          lastName: '',
+          email: '',
+          password: '',
+          phoneNumber: '',
+          licenseNumber: '',
+          specialization: '',
+          qualifications: '',
+          yearsOfExperience: '',
+          emergencyContactName: '',
+          emergencyContactPhone: '',
+          emergencyContactEmail: '',
+          emergencyContactRelationship: '',
+        });
+        setShowRegisterForm(false);
+        fetchDoctors();
+      } else {
+        toast.error(res.message || 'Registration failed');
+      }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.message || 'Registration failed');
+    } finally {
+      setRegisterLoading(false);
+    }
+  };
 
   useEffect(() => {
     fetchDoctors();
@@ -151,7 +212,170 @@ export default function AdminDoctorsPage() {
             </div>
           </div>
 
-          {/* Register Form Section ... (omitted for brevity in this step, keeping it same but with better styling) */}
+          {showRegisterForm && (
+            <div className="glass-card p-6 md:p-8 mb-8 border-white/60 shadow-xl">
+              <div className="flex items-start justify-between gap-4 mb-6">
+                <div>
+                  <h3 className="text-2xl font-black text-slate-800">Register New Doctor</h3>
+                  <p className="text-slate-500 text-sm font-medium">Create a doctor account directly without the approval queue.</p>
+                </div>
+                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full">Instant Activation</span>
+              </div>
+
+              <form onSubmit={handleRegisterSubmit} className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">First Name</label>
+                    <input
+                      value={registerForm.firstName}
+                      onChange={(e) => handleRegisterChange('firstName', e.target.value)}
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-medium"
+                      placeholder="Jane"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Last Name</label>
+                    <input
+                      value={registerForm.lastName}
+                      onChange={(e) => handleRegisterChange('lastName', e.target.value)}
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-medium"
+                      placeholder="Doe"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Email</label>
+                    <input
+                      type="email"
+                      value={registerForm.email}
+                      onChange={(e) => handleRegisterChange('email', e.target.value)}
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-medium"
+                      placeholder="doctor@example.com"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Temporary Password</label>
+                    <input
+                      type="text"
+                      value={registerForm.password}
+                      onChange={(e) => handleRegisterChange('password', e.target.value)}
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-medium"
+                      placeholder="Auto-generate or set"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Phone Number</label>
+                    <input
+                      value={registerForm.phoneNumber}
+                      onChange={(e) => handleRegisterChange('phoneNumber', e.target.value)}
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-medium"
+                      placeholder="+1 (555) 123-4567"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">License Number</label>
+                    <input
+                      value={registerForm.licenseNumber}
+                      onChange={(e) => handleRegisterChange('licenseNumber', e.target.value)}
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-medium"
+                      placeholder="MD-12345"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Specialization</label>
+                    <input
+                      value={registerForm.specialization}
+                      onChange={(e) => handleRegisterChange('specialization', e.target.value)}
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-medium"
+                      placeholder="Cardiology"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Qualifications</label>
+                    <input
+                      value={registerForm.qualifications}
+                      onChange={(e) => handleRegisterChange('qualifications', e.target.value)}
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-medium"
+                      placeholder="MD, PhD"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Years of Experience</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={registerForm.yearsOfExperience}
+                      onChange={(e) => handleRegisterChange('yearsOfExperience', e.target.value)}
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-medium"
+                      placeholder="10"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Emergency Contact Name</label>
+                    <input
+                      value={registerForm.emergencyContactName}
+                      onChange={(e) => handleRegisterChange('emergencyContactName', e.target.value)}
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-medium"
+                      placeholder="Contact person"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Emergency Contact Relationship</label>
+                    <input
+                      value={registerForm.emergencyContactRelationship}
+                      onChange={(e) => handleRegisterChange('emergencyContactRelationship', e.target.value)}
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-medium"
+                      placeholder="Partner, sibling, etc."
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Emergency Contact Phone</label>
+                    <input
+                      value={registerForm.emergencyContactPhone}
+                      onChange={(e) => handleRegisterChange('emergencyContactPhone', e.target.value)}
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-medium"
+                      placeholder="+1 (555) 987-6543"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Emergency Contact Email</label>
+                    <input
+                      type="email"
+                      value={registerForm.emergencyContactEmail}
+                      onChange={(e) => handleRegisterChange('emergencyContactEmail', e.target.value)}
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-medium"
+                      placeholder="contact@example.com"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-3 justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setShowRegisterForm(false)}
+                    className="px-5 py-3 bg-white border border-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-50 transition"
+                    disabled={registerLoading}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-6 py-3 bg-emerald-600 text-white font-black rounded-xl uppercase tracking-widest flex items-center gap-2 hover:bg-emerald-700 transition shadow-lg shadow-emerald-500/20"
+                    disabled={registerLoading}
+                  >
+                    {registerLoading ? <Loader size={18} className="animate-spin" /> : <UserPlus size={18} />}<span>{registerLoading ? 'Registering...' : 'Create Doctor Account'}</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
 
           {/* Action Bar: Search & Filters */}
           <div className="glass-card p-4 mb-8 border-white/50 shadow-sm flex flex-col lg:flex-row gap-4">

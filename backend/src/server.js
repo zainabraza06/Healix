@@ -1,4 +1,5 @@
 import express from 'express';
+import http from 'http';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
@@ -6,6 +7,7 @@ import connectDB from './config/db.js';
 import routes from './routes/index.js';
 import errorHandler from './middleware/errorHandler.js';
 import config from './config/index.js';
+import { initSocket } from './config/socket.js';
 
 dotenv.config();
 
@@ -44,11 +46,12 @@ app.use((req, res) => {
   });
 });
 
-// Start server
+// Start server with Socket.IO
 const PORT = config.port;
-app.listen(PORT, () => {
-  console.log(`
-Server is running on port ${PORT}`);
+const server = http.createServer(app);
+initSocket(server, config.corsOrigins);
+server.listen(PORT, () => {
+  console.log(`\nServer is running on port ${PORT}`);
 });
 
 export default app;

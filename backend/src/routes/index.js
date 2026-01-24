@@ -4,6 +4,7 @@ import adminRoutes from './adminRoutes.js';
 import doctorRoutes from './doctorRoutes.js';
 import patientRoutes from './patientRoutes.js';
 import medicalRecordRoutes from './medicalRecordRoutes.js';
+import chatRoutes from './chatRoutes.js';
 
 const router = express.Router();
 
@@ -13,6 +14,7 @@ router.use('/admin', adminRoutes);
 router.use('/doctor', doctorRoutes);
 router.use('/patient', patientRoutes);
 router.use('/medical-records', medicalRecordRoutes);
+router.use('/chat', chatRoutes);
 
 // Health check
 router.get('/health', (req, res) => {
