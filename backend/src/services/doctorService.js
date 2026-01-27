@@ -350,6 +350,7 @@ export const getDoctorPatients = async (doctorId) => {
 export const getDoctorAlerts = async (doctorId, page = 0, size = 10, status) => {
   try {
     const Alert = (await import('../models/Alert.js')).default;
+    const Prescription = (await import('../models/Prescription.js')).default;
     const query = { doctor_id: doctorId };
     
     if (status) {
@@ -364,6 +365,10 @@ export const getDoctorAlerts = async (doctorId, page = 0, size = 10, status) => 
           path: 'user_id',
           select: 'full_name email'
         }
+      })
+      .populate({
+        path: 'prescription_id',
+        select: 'medications notes status issued_date'
       })
       .sort({ created_at: -1 })
       .skip(page * size)
@@ -386,6 +391,8 @@ export const getDoctorAlerts = async (doctorId, page = 0, size = 10, status) => 
         status: alert.status,
         instructions: alert.instructions,
         prescription: alert.prescription,
+        prescriptionId: alert.prescription_id?._id,
+        prescriptionData: alert.prescription_id,
         createdAt: alert.created_at,
         resolvedAt: alert.resolved_at,
         timestamp: alert.created_at
@@ -405,9 +412,10 @@ export const getDoctorAlerts = async (doctorId, page = 0, size = 10, status) => 
 /**
  * Resolve an alert with instructions and optional prescription
  */
-export const resolveAlert = async (alertId, doctorId, instructions, prescription) => {
+export const resolveAlert = async (alertId, doctorId, instructions, prescriptionData) => {
   try {
     const Alert = (await import('../models/Alert.js')).default;
+    const Prescription = (await import('../models/Prescription.js')).default;
     
     const alert = await Alert.findById(alertId);
     if (!alert) {
@@ -423,15 +431,42 @@ export const resolveAlert = async (alertId, doctorId, instructions, prescription
       throw err;
     }
 
+    let prescriptionId = null;
+
+    // Create prescription if provided
+    if (prescriptionData && (prescriptionData.medications?.length > 0 || prescriptionData.notes)) {
+      try {
+        const newPrescription = new Prescription({
+          patient_id: alert.patient_id,
+          doctor_id: doctorId,
+          alert_id: alertId,
+          medications: prescriptionData.medications || [],
+          notes: prescriptionData.notes || '',
+          status: 'ACTIVE',
+          issued_date: new Date(),
+        });
+        const savedPrescription = await newPrescription.save();
+        prescriptionId = savedPrescription._id;
+      } catch (prescError) {
+        console.error('Error creating prescription:', prescError);
+        // Continue without prescription if creation fails
+      }
+    }
+
     // Update alert with resolution
     alert.status = 'RESOLVED';
     alert.instructions = instructions;
-    alert.prescription = prescription || null;
+    alert.prescription = prescriptionData?.medications 
+      ? JSON.stringify(prescriptionData.medications)
+      : (prescriptionData?.notes || null);
+    alert.prescription_id = prescriptionId;
     alert.resolved_at = new Date();
     
     await alert.save();
 
-    return await Alert.findById(alertId).populate('patient_id', 'full_name email').lean();
+    return await Alert.findById(alertId)
+      .populate({ path: 'patient_id', select: 'full_name email user_id', populate: { path: 'user_id', select: '_id full_name email' } })
+      .lean();
   } catch (error) {
     throw error;
   }

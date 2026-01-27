@@ -16,7 +16,11 @@ export default function DoctorAlertsPage() {
   const [selectedStatus, setSelectedStatus] = useState<string>('ACTIVE');
   const [expandedAlert, setExpandedAlert] = useState<string | null>(null);
   const [showResolveModal, setShowResolveModal] = useState(false);
-  const [resolveForm, setResolveForm] = useState({ instructions: '', prescription: '' });
+  const [resolveForm, setResolveForm] = useState({ 
+    instructions: '', 
+    medications: [{ name: '', dosage: '', frequency: '', duration: '', instructions: '' }],
+    notes: ''
+  });
   const [resolving, setResolving] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
   const pageSize = 10;
@@ -48,6 +52,13 @@ export default function DoctorAlertsPage() {
       return;
     }
 
+    // Filter out empty medications
+    const medications = resolveForm.medications.filter(med => med.name.trim());
+    if (medications.length === 0) {
+      toast.error('Please add at least one medication');
+      return;
+    }
+
     const currentAlert = alerts.content?.find((a: any) => a.id === expandedAlert);
     if (!currentAlert) return;
 
@@ -56,13 +67,20 @@ export default function DoctorAlertsPage() {
       const response = await apiClient.resolveAlert(
         currentAlert.id,
         resolveForm.instructions,
-        resolveForm.prescription || undefined
+        JSON.stringify({
+          medications,
+          notes: resolveForm.notes
+        })
       );
 
       if (response.success) {
         toast.success('Alert resolved successfully');
         setShowResolveModal(false);
-        setResolveForm({ instructions: '', prescription: '' });
+        setResolveForm({ 
+          instructions: '', 
+          medications: [{ name: '', dosage: '', frequency: '', duration: '', instructions: '' }],
+          notes: ''
+        });
         setExpandedAlert(null);
         fetchAlerts();
       } else {
@@ -79,7 +97,11 @@ export default function DoctorAlertsPage() {
   const openResolveModal = (e: React.MouseEvent) => {
     e.stopPropagation();
     setShowResolveModal(true);
-    setResolveForm({ instructions: '', prescription: '' });
+    setResolveForm({ 
+      instructions: '', 
+      medications: [{ name: '', dosage: '', frequency: '', duration: '', instructions: '' }],
+      notes: ''
+    });
   };
 
   const getSeverityColor = (severity: string) => {
@@ -87,7 +109,7 @@ export default function DoctorAlertsPage() {
       case 'CRITICAL': return 'bg-red-100 text-red-800 border-red-300';
       case 'HIGH': return 'bg-orange-100 text-orange-800 border-orange-300';
       case 'MEDIUM': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
-      case 'LOW': return 'bg-blue-100 text-blue-800 border-blue-300';
+      case 'LOW': return 'bg-emerald-100 text-emerald-800 border-emerald-300';
       default: return 'bg-gray-100 text-gray-800 border-gray-300';
     }
   };
@@ -132,7 +154,10 @@ export default function DoctorAlertsPage() {
               {status}
               {alerts && (
                 <span className="ml-2 px-2 py-0.5 rounded-full text-xs bg-white/20">
-                  {status === 'ALL' ? alerts.totalElements : status === selectedStatus ? alerts.content?.length || 0 : 0}
+                  {/* Show the total count for the currently selected filter to avoid misleading cross-tab counts */}
+                  {((status === 'ALL' && !selectedStatus) || status === selectedStatus)
+                    ? alerts.totalElements || 0
+                    : '–'}
                 </span>
               )}
             </button>
@@ -157,7 +182,7 @@ export default function DoctorAlertsPage() {
                     case 'CRITICAL': return 'bg-red-200 text-red-900 border-red-300';
                     case 'HIGH': return 'bg-orange-200 text-orange-900 border-orange-300';
                     case 'MEDIUM': return 'bg-yellow-100 text-yellow-900 border-yellow-200';
-                    case 'LOW': return 'bg-blue-100 text-blue-900 border-blue-200';
+                    case 'LOW': return 'bg-emerald-100 text-emerald-900 border-emerald-200';
                     default: return 'bg-slate-100 text-slate-700 border-slate-200';
                   }
                 };
@@ -196,7 +221,7 @@ export default function DoctorAlertsPage() {
                     {alert.patientName && (
                       <div className="flex flex-wrap gap-4 text-xs mb-3">
                         <div className="flex items-center gap-1.5">
-                          <User className="w-4 h-4 text-blue-600" />
+                          <User className="w-4 h-4 text-emerald-600" />
                           <span className="font-semibold text-slate-700">{alert.patientName}</span>
                         </div>
                       </div>
@@ -270,7 +295,7 @@ export default function DoctorAlertsPage() {
                           case 'CRITICAL': return 'bg-red-200 text-red-800';
                           case 'HIGH': return 'bg-orange-200 text-orange-800';
                           case 'MEDIUM': return 'bg-yellow-200 text-yellow-800';
-                          case 'LOW': return 'bg-blue-200 text-blue-800';
+                          case 'LOW': return 'bg-emerald-200 text-emerald-800';
                           default: return 'bg-slate-200 text-slate-800';
                         }
                       })()}`}
@@ -313,7 +338,7 @@ export default function DoctorAlertsPage() {
                     <>
                       {/* Patient Info */}
                       {alert.patientName && (
-                        <div className="p-4 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl text-white shadow-lg">
+                        <div className="p-4 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl text-white shadow-lg">
                           <div className="flex items-center gap-3 mb-2">
                             <User className="w-5 h-5" />
                             <p className="text-sm font-bold">Patient Information</p>
@@ -350,14 +375,47 @@ export default function DoctorAlertsPage() {
                           )}
 
                           {alert.prescription && (
-                            <div className="bg-blue-50 p-6 rounded-2xl border-2 border-blue-200">
+                            <div className="bg-emerald-50 p-6 rounded-2xl border-2 border-emerald-200">
                               <div className="flex items-center gap-2 mb-3">
-                                <Activity className="w-5 h-5 text-blue-700" />
-                                <h5 className="text-sm font-bold text-blue-900 uppercase tracking-wider">Prescription</h5>
+                                <Activity className="w-5 h-5 text-emerald-700" />
+                                <h5 className="text-sm font-bold text-emerald-900 uppercase tracking-wider">Prescription</h5>
                               </div>
-                              <p className="text-sm text-blue-900 leading-relaxed whitespace-pre-wrap font-medium">
-                                {alert.prescription}
-                              </p>
+                              {alert.prescriptionData?.medications && alert.prescriptionData.medications.length > 0 ? (
+                                <div className="space-y-4">
+                                  {alert.prescriptionData.medications.map((med: any, idx: number) => (
+                                    <div key={idx} className="bg-white p-4 rounded-lg border border-emerald-100">
+                                      <h6 className="font-bold text-emerald-900 mb-2">{med.name}</h6>
+                                      <div className="grid grid-cols-2 gap-2 text-xs text-emerald-800">
+                                        <div>
+                                          <p className="font-semibold text-emerald-700">Dosage</p>
+                                          <p>{med.dosage}</p>
+                                        </div>
+                                        <div>
+                                          <p className="font-semibold text-emerald-700">Frequency</p>
+                                          <p>{med.frequency}</p>
+                                        </div>
+                                        <div className="col-span-2">
+                                          <p className="font-semibold text-emerald-700">Duration</p>
+                                          <p>{med.duration}</p>
+                                        </div>
+                                      </div>
+                                      {med.instructions && (
+                                        <p className="text-xs text-emerald-700 mt-2 italic">{med.instructions}</p>
+                                      )}
+                                    </div>
+                                  ))}
+                                  {alert.prescriptionData?.notes && (
+                                    <div className="bg-white p-4 rounded-lg border border-emerald-100">
+                                      <p className="text-xs font-semibold text-emerald-700 mb-1">Additional Notes</p>
+                                      <p className="text-sm text-emerald-900">{alert.prescriptionData.notes}</p>
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <p className="text-sm text-emerald-900 leading-relaxed whitespace-pre-wrap font-medium">
+                                  {alert.prescription}
+                                </p>
+                              )}
                             </div>
                           )}
                         </div>
@@ -401,11 +459,11 @@ export default function DoctorAlertsPage() {
                       {snapshotText && (
                         <div>
                           <h4 className="text-lg font-bold text-slate-800 mb-3 flex items-center gap-2">
-                            <Activity className="w-5 h-5 text-blue-600" />
+                            <Activity className="w-5 h-5 text-emerald-600" />
                             Vitals Snapshot
                           </h4>
-                          <div className="bg-blue-50 p-4 rounded-xl border border-blue-200">
-                            <p className="text-sm text-blue-900 leading-relaxed font-mono">
+                          <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200">
+                            <p className="text-sm text-emerald-900 leading-relaxed font-mono">
                               {snapshotText}
                             </p>
                           </div>
@@ -485,22 +543,139 @@ export default function DoctorAlertsPage() {
                     onChange={(e) => setResolveForm({ ...resolveForm, instructions: e.target.value })}
                     placeholder="Provide instructions for the patient (e.g., rest, monitor vitals, visit ER if symptoms worsen...)"
                     className="w-full p-4 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 resize-none font-medium"
-                    rows={5}
+                    rows={4}
                     disabled={resolving}
                   />
                 </div>
 
-                {/* Prescription (Optional) */}
+                {/* Medications */}
+                <div>
+                  <div className="flex justify-between items-center mb-3">
+                    <label className="block text-sm font-bold text-slate-800">
+                      Medications <span className="text-red-600">*</span>
+                    </label>
+                    <button
+                      onClick={() => setResolveForm({
+                        ...resolveForm,
+                        medications: [...resolveForm.medications, { name: '', dosage: '', frequency: '', duration: '', instructions: '' }]
+                      })}
+                      className="text-xs px-3 py-1 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200 font-bold"
+                      disabled={resolving}
+                    >
+                      + Add Medication
+                    </button>
+                  </div>
+                  <div className="space-y-3">
+                    {resolveForm.medications.map((med, idx) => (
+                      <div key={idx} className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                        <div className="flex justify-between items-start mb-3">
+                          <h4 className="text-xs font-bold text-slate-600 uppercase">Medication {idx + 1}</h4>
+                          {resolveForm.medications.length > 1 && (
+                            <button
+                              onClick={() => setResolveForm({
+                                ...resolveForm,
+                                medications: resolveForm.medications.filter((_, i) => i !== idx)
+                              })}
+                              className="text-red-600 hover:text-red-700 font-bold text-sm"
+                              disabled={resolving}
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-xs font-semibold text-slate-600 mb-1 block">Name</label>
+                            <input
+                              type="text"
+                              value={med.name}
+                              onChange={(e) => {
+                                const newMeds = [...resolveForm.medications];
+                                newMeds[idx].name = e.target.value;
+                                setResolveForm({ ...resolveForm, medications: newMeds });
+                              }}
+                              placeholder="e.g., Aspirin"
+                              className="w-full p-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                              disabled={resolving}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs font-semibold text-slate-600 mb-1 block">Dosage</label>
+                            <input
+                              type="text"
+                              value={med.dosage}
+                              onChange={(e) => {
+                                const newMeds = [...resolveForm.medications];
+                                newMeds[idx].dosage = e.target.value;
+                                setResolveForm({ ...resolveForm, medications: newMeds });
+                              }}
+                              placeholder="e.g., 500mg"
+                              className="w-full p-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                              disabled={resolving}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs font-semibold text-slate-600 mb-1 block">Frequency</label>
+                            <input
+                              type="text"
+                              value={med.frequency}
+                              onChange={(e) => {
+                                const newMeds = [...resolveForm.medications];
+                                newMeds[idx].frequency = e.target.value;
+                                setResolveForm({ ...resolveForm, medications: newMeds });
+                              }}
+                              placeholder="e.g., 3 times daily"
+                              className="w-full p-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                              disabled={resolving}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs font-semibold text-slate-600 mb-1 block">Duration</label>
+                            <input
+                              type="text"
+                              value={med.duration}
+                              onChange={(e) => {
+                                const newMeds = [...resolveForm.medications];
+                                newMeds[idx].duration = e.target.value;
+                                setResolveForm({ ...resolveForm, medications: newMeds });
+                              }}
+                              placeholder="e.g., 7 days"
+                              className="w-full p-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                              disabled={resolving}
+                            />
+                          </div>
+                        </div>
+                        <div className="mt-3">
+                          <label className="text-xs font-semibold text-slate-600 mb-1 block">Instructions</label>
+                          <input
+                            type="text"
+                            value={med.instructions}
+                            onChange={(e) => {
+                              const newMeds = [...resolveForm.medications];
+                              newMeds[idx].instructions = e.target.value;
+                              setResolveForm({ ...resolveForm, medications: newMeds });
+                            }}
+                            placeholder="e.g., Take with food, avoid alcohol"
+                            className="w-full p-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            disabled={resolving}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Notes */}
                 <div>
                   <label className="block text-sm font-bold text-slate-800 mb-2">
-                    Prescription <span className="text-slate-400 text-xs">(Optional)</span>
+                    Additional Notes <span className="text-slate-400 text-xs">(Optional)</span>
                   </label>
                   <textarea
-                    value={resolveForm.prescription}
-                    onChange={(e) => setResolveForm({ ...resolveForm, prescription: e.target.value })}
-                    placeholder="Enter prescription details (medications, dosage, duration...)"
+                    value={resolveForm.notes}
+                    onChange={(e) => setResolveForm({ ...resolveForm, notes: e.target.value })}
+                    placeholder="Any additional information or warnings for the patient..."
                     className="w-full p-4 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 resize-none font-medium"
-                    rows={4}
+                    rows={3}
                     disabled={resolving}
                   />
                 </div>
@@ -516,7 +691,7 @@ export default function DoctorAlertsPage() {
                   </button>
                   <button
                     onClick={handleResolveAlert}
-                    disabled={resolving || !resolveForm.instructions.trim()}
+                    disabled={resolving || !resolveForm.instructions.trim() || resolveForm.medications.filter(m => m.name.trim()).length === 0}
                     className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 transition shadow-lg flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {resolving ? (

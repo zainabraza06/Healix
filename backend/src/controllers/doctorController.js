@@ -1,4 +1,5 @@
 import { getDoctorDashboard, requestDoctorStatusChange, getDoctorPatients, getDoctorAlerts, resolveAlert } from '../services/doctorService.js';
+import { getIO } from '../config/socket.js';
 import Doctor from '../models/Doctor.js';
 import { successResponse, errorResponse } from '../utils/response.js';
 
@@ -101,12 +102,37 @@ export const resolveAlertController = async (req, res, next) => {
             return res.status(400).json(errorResponse('Instructions are required'));
         }
 
-        const doctor = await Doctor.findOne({ user_id: userId });
+        const doctor = await Doctor.findOne({ user_id: userId }).populate('user_id', 'full_name email');
         if (!doctor) {
             return res.status(404).json(errorResponse('Doctor profile not found'));
         }
 
         const resolvedAlert = await resolveAlert(alertId, doctor._id, instructions, prescription);
+        try {
+            const io = getIO();
+            // Extract patient's user_id safely - it's nested in the populated structure
+            const patientUserId = resolvedAlert?.patient_id?.user_id?._id;
+            console.log('Alert resolved - emitting to patient room:', {
+                patientUserId,
+                alertId,
+                patient_id: resolvedAlert?.patient_id,
+            });
+            
+            if (patientUserId) {
+                io.to(`user:${patientUserId}`).emit('alert:resolved', {
+                    alertId,
+                    instructions: resolvedAlert.instructions,
+                    prescription: resolvedAlert.prescription,
+                    resolved_at: resolvedAlert.resolved_at,
+                    doctor_name: doctor.user_id?.full_name || 'Doctor'
+                });
+                console.log(`alert:resolved emitted to user:${patientUserId}`);
+            } else {
+                console.warn('Could not extract patient userId from resolved alert');
+            }
+        } catch (emitErr) {
+            console.error('Failed to emit alert:resolved socket event', emitErr);
+        }
         res.json(successResponse('Alert resolved successfully', resolvedAlert));
     } catch (error) {
         next(error);

@@ -200,6 +200,16 @@ export const notifyDoctorForCriticalVitalsController = async (req, res, next) =>
         email: patient.user_id?.email
       }
     });
+    // Also emit to the doctor's user-scoped room so they receive it anywhere
+    if (doctor.user_id) {
+      io.to(`user:${doctor.user_id}`).emit('alert:assigned', {
+        doctorId,
+        alertId: latestAlert._id,
+        patientName: patient.user_id?.full_name,
+        message: latestAlert.message,
+        created_at: latestAlert.created_at
+      });
+    }
 
     // Email emergency contact
     const { sendEmail } = await import('../config/email.js');

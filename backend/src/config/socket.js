@@ -31,6 +31,9 @@ export const initSocket = (server, corsOrigins = ['http://localhost:3000']) => {
       onlineUsers.set(userKey, { socketId: socket.id, role, doctorId, patientId });
       console.log(`User ${userKey} (${role}) is now online`);
 
+      // Always join a user-scoped room so we can emit by userId without needing doctor/patient ids
+      socket.join(`user:${userKey}`);
+
       // Join per-role rooms using user-scoped ids only
       if (role === 'DOCTOR' && doctorId) {
         socket.join(`doctor:${normalizeId(doctorId)}`);

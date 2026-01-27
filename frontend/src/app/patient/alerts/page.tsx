@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useAuthStore } from "@/lib/authStore";
 import { apiClient } from "@/lib/apiClient";
 import ProtectedLayout from "@/components/ProtectedLayout";
-import { AlertCircle, ChevronLeft, ChevronRight, X, Stethoscope, MessageSquare, CheckCircle, Clock, Users, Plus, Activity, Calendar } from "lucide-react";
+import { AlertCircle, ChevronLeft, ChevronRight, X, Stethoscope, MessageSquare, CheckCircle, Clock, Users, Plus, Activity, Calendar, Bell } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import toast from "react-hot-toast";
@@ -23,6 +23,7 @@ export default function AllAlertsPage() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'RESOLVED'>('ALL');
   const [expandedAlert, setExpandedAlert] = useState<string | null>(null);
   const [showDoctorSelect, setShowDoctorSelect] = useState(false);
@@ -34,6 +35,30 @@ export default function AllAlertsPage() {
   const [showCreateAlertModal, setShowCreateAlertModal] = useState(false);
 
   const pageSize = 10;
+
+  useEffect(() => {
+    if (user) {
+      const handleAlertResolved = (data: any) => {
+        toast.success(`Alert Resolved! Doctor has provided instructions and prescription.`, {
+          duration: 5000,
+          icon: '✓'
+        });
+        fetchAlerts();
+      };
+      
+      try {
+        const socket = require('@/lib/socket').getSocket?.();
+        if (socket) {
+          socket.on('alert:resolved', handleAlertResolved);
+          return () => {
+            socket.off('alert:resolved', handleAlertResolved);
+          };
+        }
+      } catch (e) {
+        console.log('Socket not available');
+      }
+    }
+  }, [user]);
 
   useEffect(() => {
     if (user) {
@@ -50,6 +75,7 @@ export default function AllAlertsPage() {
       if (response.success && response.data) {
         setAlerts(response.data.content || []);
         setTotalPages(response.data.totalPages || 1);
+        setTotalCount(response.data.totalElements || 0);
       }
     } catch (error) {
       console.error('Failed to fetch alerts', error);
@@ -153,7 +179,7 @@ export default function AllAlertsPage() {
               <h1 className="text-4xl font-black text-slate-800 mb-2">
                 Health <span className="bg-clip-text text-transparent bg-gradient-to-r from-emerald-600 to-teal-500">Alerts</span>
               </h1>
-              <p className="text-slate-600 font-medium">{alerts.length} total alerts</p>
+              <p className="text-slate-600 font-medium">{totalCount} total alerts</p>
             </div>
             
             {/* Create Alert Button */}
@@ -358,7 +384,7 @@ export default function AllAlertsPage() {
                     return (
                       <>
                         {/* Doctor Consultation Status */}
-                        {alert.doctor_id && (
+                        {alert.doctor_id && alert.status !== 'RESOLVED' && (
                           <div className="p-4 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl text-white shadow-lg">
                             <div className="flex items-center gap-3 mb-2">
                               <Stethoscope className="w-5 h-5" />
@@ -396,14 +422,50 @@ export default function AllAlertsPage() {
                             )}
 
                             {alert.prescription && (
-                              <div className="bg-blue-50 p-6 rounded-2xl border-2 border-blue-200">
+                              <div className="bg-emerald-50 p-6 rounded-2xl border-2 border-emerald-200">
                                 <div className="flex items-center gap-2 mb-3">
-                                  <Activity className="w-5 h-5 text-blue-700" />
-                                  <h5 className="text-sm font-bold text-blue-900 uppercase tracking-wider">Prescription</h5>
+                                  <Activity className="w-5 h-5 text-emerald-700" />
+                                  <h5 className="text-sm font-bold text-emerald-900 uppercase tracking-wider">Prescription</h5>
                                 </div>
-                                <p className="text-sm text-blue-900 leading-relaxed whitespace-pre-wrap font-medium">
-                                  {alert.prescription}
-                                </p>
+                                {typeof alert.prescription === 'string' && alert.prescription.startsWith('[') ? (
+                                  (() => {
+                                    try {
+                                      const medications = JSON.parse(alert.prescription);
+                                      return (
+                                        <div className="space-y-3">
+                                          {medications.map((med: any, idx: number) => (
+                                            <div key={idx} className="bg-white p-3 rounded-lg border border-emerald-100">
+                                              <h6 className="font-bold text-emerald-900 mb-2">{med.name}</h6>
+                                              <div className="grid grid-cols-2 gap-2 text-xs text-emerald-800">
+                                                <div>
+                                                  <p className="font-semibold text-emerald-700">Dosage</p>
+                                                  <p>{med.dosage}</p>
+                                                </div>
+                                                <div>
+                                                  <p className="font-semibold text-emerald-700">Frequency</p>
+                                                  <p>{med.frequency}</p>
+                                                </div>
+                                                <div className="col-span-2">
+                                                  <p className="font-semibold text-emerald-700">Duration</p>
+                                                  <p>{med.duration}</p>
+                                                </div>
+                                              </div>
+                                              {med.instructions && (
+                                                <p className="text-xs text-emerald-700 mt-2 italic">{med.instructions}</p>
+                                              )}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      );
+                                    } catch (e) {
+                                      return <p className="text-sm text-emerald-900 leading-relaxed whitespace-pre-wrap font-medium">{alert.prescription}</p>;
+                                    }
+                                  })()
+                                ) : (
+                                  <p className="text-sm text-emerald-900 leading-relaxed whitespace-pre-wrap font-medium">
+                                    {alert.prescription}
+                                  </p>
+                                )}
                               </div>
                             )}
                           </div>
