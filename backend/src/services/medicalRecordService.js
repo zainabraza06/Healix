@@ -2,6 +2,7 @@ import MedicalRecord from '../models/MedicalRecord.js';
 import Patient from '../models/Patient.js';
 import Appointment from '../models/Appointment.js';
 import Alert from '../models/Alert.js';
+import Prescription from '../models/Prescription.js';
 
 /**
  * Get full medical records for a patient
@@ -24,13 +25,15 @@ export const getPatientMedicalRecords = async (userId) => {
             };
         }
 
-        // Fetch history: Completed Appointments & Alerts
+        // Fetch history: Completed Appointments with Prescriptions & Alerts with full details
         const [completedAppointments, alerts] = await Promise.all([
             Appointment.find({ patient_id: patient._id, status: 'COMPLETED' })
                 .populate({ path: 'doctor_id', populate: { path: 'user_id', select: 'full_name' } })
+                .populate('prescription_id')
                 .sort({ appointment_date: -1 })
                 .lean(),
             Alert.find({ patient_id: patient._id })
+                .populate('prescription_id')
                 .sort({ created_at: -1 })
                 .lean()
         ]);
@@ -43,7 +46,8 @@ export const getPatientMedicalRecords = async (userId) => {
                     date: a.appointment_date,
                     doctorName: a.doctor_id?.user_id?.full_name || 'Doctor',
                     notes: a.notes,
-                    type: a.appointment_type
+                    type: a.appointment_type,
+                    prescription: a.prescription_id || null
                 })),
                 alerts: alerts.map(a => ({
                     id: a._id,
@@ -51,7 +55,9 @@ export const getPatientMedicalRecords = async (userId) => {
                     message: a.message,
                     severity: a.severity,
                     date: a.created_at,
-                    status: a.status
+                    status: a.status,
+                    instructions: a.instructions || null,
+                    prescription: a.prescription_id || null
                 }))
             }
         };
@@ -287,21 +293,82 @@ export const generateMedicalRecordsPDF = async (patientId, res) => {
             doc.rect(MARGIN, doc.y, CONTENT_WIDTH, 20).fill(COLORS.headerBg).stroke(COLORS.border);
             doc.fillColor(COLORS.slate800).fontSize(9).font('Helvetica-Bold');
             doc.text('Severity', MARGIN + 8, doc.y + 6, { width: 80 });
-            doc.text('Message', MARGIN + 100, doc.y + 6, { width: 280 });
-            doc.text('Date', MARGIN + 390, doc.y + 6, { width: CONTENT_WIDTH - 398 });
+            doc.text('Message', MARGIN + 100, doc.y + 6, { width: 180 });
+            doc.text('Status', MARGIN + 290, doc.y + 6, { width: 80 });
+            doc.text('Date', MARGIN + 380, doc.y + 6, { width: CONTENT_WIDTH - 388 });
             doc.moveDown(2.2);
 
             // Table rows (Show recent 5 alerts)
             records.history.alerts.slice(0, 5).forEach((item) => {
-                const rowHeight = 30;
+                const rowHeight = 35;
                 const severityColor = item.severity === 'CRITICAL' ? '#ef4444' : (item.severity === 'HIGH' ? '#f59e0b' : COLORS.teal);
                 doc.rect(MARGIN, doc.y, CONTENT_WIDTH, rowHeight).stroke(COLORS.border);
                 doc.fillColor(severityColor).fontSize(8).font('Helvetica-Bold');
                 doc.text(item.severity, MARGIN + 8, doc.y + 8, { width: 80, height: rowHeight - 10 });
                 doc.fillColor(COLORS.slate800).fontSize(8).font('Helvetica');
-                doc.text(item.message, MARGIN + 100, doc.y + 8, { width: 280, height: rowHeight - 10 });
-                doc.text(new Date(item.date).toLocaleDateString(), MARGIN + 390, doc.y + 8, { width: CONTENT_WIDTH - 398, height: rowHeight - 10 });
-                doc.moveDown(3.2);
+                doc.text(item.message, MARGIN + 100, doc.y + 8, { width: 180, height: rowHeight - 10 });
+                doc.fillColor(COLORS.slate600).fontSize(8).font('Helvetica-Bold');
+                doc.text(item.status, MARGIN + 290, doc.y + 8, { width: 80, height: rowHeight - 10 });
+                doc.fillColor(COLORS.slate600).fontSize(8).font('Helvetica');
+                doc.text(new Date(item.date).toLocaleDateString(), MARGIN + 380, doc.y + 8, { width: CONTENT_WIDTH - 388, height: rowHeight - 10 });
+                
+                // Show resolved alert details if available
+                if (item.status === 'RESOLVED' && (item.instructions || item.prescription)) {
+                    doc.moveDown(3.5);
+                    if (item.instructions) {
+                        doc.fillColor(COLORS.slate600).fontSize(8).font('Helvetica-Bold');
+                        doc.text('Instructions:', MARGIN + 20, doc.y, { width: 150 });
+                        doc.fillColor(COLORS.slate700).fontSize(8).font('Helvetica');
+                        doc.text(item.instructions, MARGIN + 20, doc.y + 12, { width: CONTENT_WIDTH - 40 });
+                    }
+                    if (item.prescription && item.prescription.medications && item.prescription.medications.length > 0) {
+                        doc.moveDown(0.8);
+                        doc.fillColor(COLORS.slate600).fontSize(8).font('Helvetica-Bold');
+                        doc.text('Prescriptions:', MARGIN + 20, doc.y, { width: 150 });
+                        doc.fillColor(COLORS.slate700).fontSize(8).font('Helvetica');
+                        item.prescription.medications.forEach((med, idx) => {
+                            const medText = `${idx + 1}. ${med.name} - ${med.dosage}, ${med.frequency} for ${med.duration}`;
+                            doc.text(medText, MARGIN + 30, doc.y + 12 + (idx * 14), { width: CONTENT_WIDTH - 50 });
+                        });
+                    }
+                }
+                doc.moveDown(3.5);
+            });
+        }
+
+        drawSectionTitle('Completed Appointments & Prescriptions');
+        if (records.history.completedAppointments.length === 0) {
+            doc.fillColor(COLORS.slate400).fontSize(10).text('No completed appointments.', MARGIN + 10);
+            doc.moveDown(0.5);
+        } else {
+            records.history.completedAppointments.forEach((apt) => {
+                doc.fillColor(COLORS.slate800).fontSize(10).font('Helvetica-Bold');
+                doc.text(`Dr. ${apt.doctorName} - ${apt.type}`, MARGIN, doc.y);
+                doc.fillColor(COLORS.slate600).fontSize(9).font('Helvetica');
+                doc.text(new Date(apt.date).toLocaleDateString(), MARGIN, doc.y + 15);
+                
+                if (apt.notes) {
+                    doc.moveDown(0.5);
+                    doc.fillColor(COLORS.slate600).fontSize(9).font('Helvetica-Bold');
+                    doc.text('Notes:', MARGIN, doc.y);
+                    doc.fillColor(COLORS.slate700).fontSize(9).font('Helvetica');
+                    doc.text(apt.notes, MARGIN + 10, doc.y + 12, { width: CONTENT_WIDTH - 20 });
+                }
+
+                if (apt.prescription && apt.prescription.medications && apt.prescription.medications.length > 0) {
+                    doc.moveDown(0.8);
+                    doc.fillColor(COLORS.slate600).fontSize(9).font('Helvetica-Bold');
+                    doc.text('Prescriptions:', MARGIN, doc.y);
+                    doc.fillColor(COLORS.slate700).fontSize(9).font('Helvetica');
+                    apt.prescription.medications.forEach((med, idx) => {
+                        const medText = `${idx + 1}. ${med.name} - ${med.dosage}, ${med.frequency} for ${med.duration}`;
+                        doc.text(medText, MARGIN + 10, doc.y + 12 + (idx * 14), { width: CONTENT_WIDTH - 20 });
+                    });
+                }
+
+                doc.moveDown(1.5);
+                doc.moveTo(MARGIN, doc.y).lineTo(WIDTH - MARGIN, doc.y).stroke(COLORS.border);
+                doc.moveDown(0.8);
             });
         }
 

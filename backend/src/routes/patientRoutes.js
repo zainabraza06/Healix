@@ -36,4 +36,9 @@ router.post('/vitals/consultation-notify', notifyDoctorForCriticalVitalsControll
 // Alerts
 router.get('/alerts', getPatientAlertsController);
 router.post('/alert/create', createPatientAlertController);
+
+// Medical Records
+router.get('/medical-records', getMedicalRecordsController);
+router.post('/medical-records/:type', addMedicalRecordEntryController);
+
 export default router;

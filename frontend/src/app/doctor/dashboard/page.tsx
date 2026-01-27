@@ -491,32 +491,7 @@ export default function DoctorDashboard() {
                 )}
               </div>
 
-              {/* Quick Navigation */}
-              <div className="space-y-3">
-                <p className="text-xs font-black text-slate-400 uppercase tracking-widest ml-2 mb-4">Quick Links</p>
-                <Link href="/doctor/patients" className="w-full glass-card p-4 hover:bg-white transition-all flex items-center justify-between group">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-blue-100 text-blue-600 rounded-xl group-hover:scale-110 transition-transform">
-                      <Users className="w-5 h-5" />
-                    </div>
-                    <p className="font-bold text-slate-700">Patient Database</p>
-                  </div>
-                  <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                    →
-                  </div>
-                </Link>
-                <Link href="/doctor/appointments" className="w-full glass-card p-4 hover:bg-white transition-all flex items-center justify-between group">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-purple-100 text-purple-600 rounded-xl group-hover:scale-110 transition-transform">
-                      <Calendar className="w-5 h-5" />
-                    </div>
-                    <p className="font-bold text-slate-700">Manage Schedule</p>
-                  </div>
-                  <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-purple-600 group-hover:text-white transition-colors">
-                    →
-                  </div>
-                </Link>
-              </div>
+             
             </div>
           </div>
         </div>
@@ -629,6 +604,40 @@ export default function DoctorDashboard() {
 
                   return (
                     <>
+                      {/* Resolved Alert - Instructions and Prescription */}
+                      {selectedAlert?.status === 'RESOLVED' && (selectedAlert?.instructions || selectedAlert?.prescription) && (
+                        <div className="space-y-4">
+                          <div className="flex items-center gap-2 mb-2">
+                            <CheckCircle className="w-6 h-6 text-emerald-600" />
+                            <h4 className="text-xl font-bold text-emerald-800">Alert Resolved</h4>
+                          </div>
+                          
+                          {selectedAlert?.instructions && (
+                            <div className="bg-emerald-50 p-6 rounded-2xl border-2 border-emerald-200">
+                              <div className="flex items-center gap-2 mb-3">
+                                <Stethoscope className="w-5 h-5 text-emerald-700" />
+                                <h5 className="text-sm font-bold text-emerald-900 uppercase tracking-wider">Doctor's Instructions</h5>
+                              </div>
+                              <p className="text-sm text-emerald-900 leading-relaxed whitespace-pre-wrap font-medium">
+                                {selectedAlert.instructions}
+                              </p>
+                            </div>
+                          )}
+
+                          {selectedAlert?.prescription && (
+                            <div className="bg-emerald-50 p-6 rounded-2xl border-2 border-emerald-200">
+                              <div className="flex items-center gap-2 mb-3">
+                                <Activity className="w-5 h-5 text-emerald-700" />
+                                <h5 className="text-sm font-bold text-emerald-900 uppercase tracking-wider">Prescription</h5>
+                              </div>
+                              <p className="text-sm text-emerald-900 leading-relaxed whitespace-pre-wrap font-medium">
+                                {selectedAlert.prescription}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       {/* Patient Information */}
                       <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
                         <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mb-2">Patient</p>

@@ -7,12 +7,13 @@ import ProtectedLayout from '@/components/ProtectedLayout';
 import {
     Loader, Activity, Calendar, AlertCircle,
     Plus, History, Shield, Info, Clipboard,
-    Heart, Thermometer, User, Building2
+    User, Building2, Download,
+    Heart
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MedicalRecord, MedicalRecordEntry } from '@/types';
+import { MedicalRecord } from '@/types';
 
 const Scene = dynamic(() => import('@/components/canvas/Scene'), { ssr: false });
 const FloatingIcons = dynamic(() => import('@/components/canvas/FloatingIcons').then(mod => mod.FloatingIcons), { ssr: false });
@@ -27,9 +28,20 @@ export default function MedicalRecordsPage() {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [modalType, setModalType] = useState<TabType | ''>('');
     const [formData, setFormData] = useState<any>({});
+    const [isDownloading, setIsDownloading] = useState(false);
 
     useEffect(() => {
         fetchRecords();
+    }, []);
+
+    useEffect(() => {
+        const handleOpenModal = (e: Event) => {
+            const event = e as CustomEvent;
+            setModalType(event.detail.type);
+            setIsModalOpen(true);
+        };
+        document.addEventListener('openModal', handleOpenModal);
+        return () => document.removeEventListener('openModal', handleOpenModal);
     }, []);
 
     const fetchRecords = async () => {
@@ -59,6 +71,30 @@ export default function MedicalRecordsPage() {
             }
         } catch (err) {
             toast.error('Failed to add record');
+        }
+    };
+
+    const handleDownloadMedicalRecord = async () => {
+        if (!records?.patient_id) {
+            toast.error('Medical record not loaded yet');
+            return;
+        }
+        try {
+            setIsDownloading(true);
+            const blob = await apiClient.downloadPatientMedicalRecord(records.patient_id);
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `medical-record-${new Date().toISOString().split('T')[0]}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            toast.success('Medical record downloaded successfully');
+        } catch (err) {
+            toast.error('Failed to download medical record');
+        } finally {
+            setIsDownloading(false);
         }
     };
 
@@ -93,11 +129,21 @@ export default function MedicalRecordsPage() {
 
                 <div className="relative z-10 container-main py-8 md:py-12">
                     {/* Header */}
-                    <div className="mb-10 animate-fade-in">
-                        <h1 className="text-5xl font-black text-slate-800 mb-3 tracking-tight">
-                            Medical <span className="bg-clip-text text-transparent bg-gradient-to-r from-emerald-600 to-teal-500">Records</span>
-                        </h1>
-                        <p className="text-slate-500 text-lg font-medium">Manage your health profile and history</p>
+                    <div className="mb-10 animate-fade-in flex items-start justify-between">
+                        <div>
+                            <h1 className="text-5xl font-black text-slate-800 mb-3 tracking-tight">
+                                Medical <span className="bg-clip-text text-transparent bg-gradient-to-r from-emerald-600 to-teal-500">Records</span>
+                            </h1>
+                            <p className="text-slate-500 text-lg font-medium">Manage your health profile and history</p>
+                        </div>
+                        <button
+                            onClick={handleDownloadMedicalRecord}
+                            disabled={isDownloading || !records?.patient_id}
+                            className="flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:scale-105"
+                        >
+                            <Download className="w-5 h-5" />
+                            {isDownloading ? 'Downloading...' : 'Download PDF'}
+                        </button>
                     </div>
 
                     {/* Navigation Tabs */}
@@ -153,14 +199,6 @@ export default function MedicalRecordsPage() {
                                     </div>
                                 </div>
                             </motion.div>
-
-                            <button
-                                onClick={() => { setModalType(activeTab === 'overview' || activeTab === 'history' ? 'immunizations' : activeTab); setIsModalOpen(true); }}
-                                className="w-full btn-primary py-4 rounded-2xl shadow-lg shadow-emerald-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
-                            >
-                                <Plus className="w-5 h-5" />
-                                Add New Record
-                            </button>
                         </div>
 
                         {/* Main Records Area */}
@@ -173,12 +211,12 @@ export default function MedicalRecordsPage() {
                                     exit={{ opacity: 0, y: -20 }}
                                     transition={{ duration: 0.3 }}
                                 >
-                                    {activeTab === 'overview' && <Overview records={records!} />}
+                                    {activeTab === 'overview' && records && <Overview records={records} />}
                                     {activeTab === 'immunizations' && <SimpleList title="Immunizations" data={records?.immunizations || []} />}
                                     {activeTab === 'allergies' && <AllergyList data={records?.allergies || []} />}
                                     {activeTab === 'operations' && <SurgeryList data={records?.operations || []} />}
                                     {activeTab === 'labResults' && <LabList data={records?.labResults || []} />}
-                                    {activeTab === 'history' && <HistoryView history={records?.history!} />}
+                                    {activeTab === 'history' && records?.history && <HistoryView history={records.history} />}
                                 </motion.div>
                             </AnimatePresence>
                         </div>
@@ -191,16 +229,20 @@ export default function MedicalRecordsPage() {
                         <motion.div
                             initial={{ scale: 0.9, opacity: 0 }}
                             animate={{ scale: 1, opacity: 1 }}
-                            className="bg-white rounded-3xl p-8 max-w-lg w-full shadow-2xl relative"
+                            className={`bg-white rounded-3xl shadow-2xl relative ${
+                                modalType === 'labResults' ? 'p-6 max-w-md' : 'p-8 max-w-lg'
+                            } w-full`}
                         >
                             <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2">
                                 <Plus className="w-6 h-6 text-emerald-500" />
                                 Add {modalType}
                             </h2>
                             <form onSubmit={handleAddEntry} className="space-y-4">
-                                {/* Simplified generic form for brevity, usually custom per type */}
+                                {/* Name / Test Field */}
                                 <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-2">Name / Test</label>
+                                    <label className="block text-sm font-bold text-slate-700 mb-2">
+                                        {modalType === 'labResults' ? 'Test Name' : 'Name'}
+                                    </label>
                                     <input
                                         type="text"
                                         className="w-full px-4 py-3 bg-slate-100 border-none rounded-xl focus:ring-2 focus:ring-emerald-500"
@@ -208,21 +250,28 @@ export default function MedicalRecordsPage() {
                                         required
                                     />
                                 </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-slate-700 mb-2">Date</label>
-                                    <input
-                                        type="date"
-                                        className="w-full px-4 py-3 bg-slate-100 border-none rounded-xl focus:ring-2 focus:ring-emerald-500"
-                                        onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                                        required
-                                    />
-                                </div>
+
+                                {/* Date Field - Not for allergies */}
+                                {modalType !== 'allergies' && (
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 mb-2">Date</label>
+                                        <input
+                                            type="date"
+                                            className="w-full px-4 py-3 bg-slate-100 border-none rounded-xl focus:ring-2 focus:ring-emerald-500"
+                                            onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                                            required
+                                        />
+                                    </div>
+                                )}
+
+                                {/* Severity - For allergies */}
                                 {modalType === 'allergies' && (
                                     <div>
                                         <label className="block text-sm font-bold text-slate-700 mb-2">Severity</label>
                                         <select
                                             className="w-full px-4 py-3 bg-slate-100 border-none rounded-xl focus:ring-2 focus:ring-emerald-500"
                                             onChange={(e) => setFormData({ ...formData, severity: e.target.value })}
+                                            defaultValue="MEDIUM"
                                         >
                                             <option value="LOW">Low</option>
                                             <option value="MEDIUM">Medium</option>
@@ -231,6 +280,65 @@ export default function MedicalRecordsPage() {
                                         </select>
                                     </div>
                                 )}
+
+                                {/* Hospital - For operations */}
+                                {modalType === 'operations' && (
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 mb-2">Hospital / Facility</label>
+                                        <input
+                                            type="text"
+                                            className="w-full px-4 py-3 bg-slate-100 border-none rounded-xl focus:ring-2 focus:ring-emerald-500"
+                                            onChange={(e) => setFormData({ ...formData, hospital: e.target.value })}
+                                        />
+                                    </div>
+                                )}
+
+                                {/* Surgeon - For operations */}
+                                {modalType === 'operations' && (
+                                    <div>
+                                        <label className="block text-sm font-bold text-slate-700 mb-2">Surgeon Name</label>
+                                        <input
+                                            type="text"
+                                            className="w-full px-4 py-3 bg-slate-100 border-none rounded-xl focus:ring-2 focus:ring-emerald-500"
+                                            onChange={(e) => setFormData({ ...formData, surgeon: e.target.value })}
+                                        />
+                                    </div>
+                                )}
+
+                                {/* Result - For lab results */}
+                                {modalType === 'labResults' && (
+                                    <>
+                                        <div>
+                                            <label className="block text-sm font-bold text-slate-700 mb-2">Result / Value</label>
+                                            <input
+                                                type="text"
+                                                className="w-full px-4 py-3 bg-slate-100 border-none rounded-xl focus:ring-2 focus:ring-emerald-500"
+                                                onChange={(e) => setFormData({ ...formData, result: e.target.value })}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-bold text-slate-700 mb-2">Unit (mg/dL, etc.)</label>
+                                            <input
+                                                type="text"
+                                                className="w-full px-4 py-3 bg-slate-100 border-none rounded-xl focus:ring-2 focus:ring-emerald-500"
+                                                onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
+                                            />
+                                        </div>
+                                    </>
+                                )}
+
+                                {/* Notes - For all types */}
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-700 mb-2">Notes (Optional)</label>
+                                    <textarea
+                                        className={`w-full px-4 py-3 bg-slate-100 border-none rounded-xl focus:ring-2 focus:ring-emerald-500 resize-none ${
+                                            modalType === 'labResults' ? 'h-16' : 'h-24'
+                                        }`}
+                                        onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                                        placeholder="Add any additional information..."
+                                    />
+                                </div>
+
                                 <div className="flex gap-4 mt-8">
                                     <button type="submit" className="flex-1 btn-primary py-3 rounded-xl font-bold">Save Entry</button>
                                     <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 bg-slate-100 text-slate-500 py-3 rounded-xl font-bold">Cancel</button>
@@ -271,16 +379,33 @@ function StatsCard({ title, count, color, icon: Icon }: any) {
 function SimpleList({ title, data }: { title: string, data: any[] }) {
     return (
         <div className="glass-card p-8 border-white/40 min-h-[400px]">
-            <h2 className="text-2xl font-black text-slate-800 mb-8 border-b pb-4 border-slate-100">{title}</h2>
+            <div className="flex items-center justify-between mb-8 border-b pb-4 border-slate-100">
+                <h2 className="text-2xl font-black text-slate-800">{title}</h2>
+                <button
+                    onClick={() => document.dispatchEvent(new CustomEvent('openModal', { detail: { type: 'immunizations' } }))}
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 transition-all"
+                >
+                    <Plus className="w-4 h-4" />
+                    Add
+                </button>
+            </div>
             {data.length === 0 ? <NoData text={`No ${title.toLowerCase()} recorded yet.`} /> : (
-                <div className="space-y-4">
+                <div className="space-y-3">
+                    <div className="grid grid-cols-12 text-[12px] font-black text-slate-500 uppercase tracking-wider px-2">
+                        <span className="col-span-5">Vaccine Name</span>
+                        <span className="col-span-3">Date</span>
+                        <span className="col-span-4">Notes</span>
+                    </div>
                     {data.map((item, idx) => (
-                        <div key={idx} className="p-5 bg-white/60 rounded-3xl border border-slate-200/50 flex justify-between items-center group hover:border-emerald-200 transition-colors">
-                            <div>
-                                <p className="font-black text-slate-800 text-lg">{item.name || item.testName}</p>
-                                <p className="text-sm text-slate-400 font-bold uppercase tracking-wider">{new Date(item.date).toLocaleDateString()}</p>
+                        <div
+                            key={idx}
+                            className="grid grid-cols-12 items-start gap-3 p-5 bg-white/70 rounded-3xl border border-slate-200/70 hover:border-emerald-200 transition-colors break-words"
+                        >
+                            <div className="col-span-5 font-black text-slate-800 leading-snug">{item.name || item.testName}</div>
+                            <div className="col-span-3 text-sm text-slate-600 font-semibold">
+                                {item.date ? new Date(item.date).toLocaleDateString() : '-'}
                             </div>
-                            <Activity className="w-5 h-5 text-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            <div className="col-span-4 text-sm text-slate-600 leading-relaxed">{item.notes || '-'}</div>
                         </div>
                     ))}
                 </div>
@@ -292,15 +417,34 @@ function SimpleList({ title, data }: { title: string, data: any[] }) {
 function AllergyList({ data }: { data: any[] }) {
     return (
         <div className="glass-card p-8 border-white/40 min-h-[400px]">
-            <h2 className="text-2xl font-black text-slate-800 mb-8 border-b pb-4 border-slate-100 uppercase tracking-tight">Active Allergies</h2>
+            <div className="flex items-center justify-between mb-8 border-b pb-4 border-slate-100">
+                <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
+                    <AlertCircle className="w-6 h-6 text-emerald-500" /> Active Allergies
+                </h2>
+                <button
+                    onClick={() => document.dispatchEvent(new CustomEvent('openModal', { detail: { type: 'allergies' } }))}
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 transition-all"
+                >
+                    <Plus className="w-4 h-4" />
+                    Add
+                </button>
+            </div>
             {data.length === 0 ? <NoData text="No allergies recorded." /> : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-3">
+                    <div className="grid grid-cols-12 text-[12px] font-black text-slate-500 uppercase tracking-wider px-2">
+                        <span className="col-span-5">Allergen</span>
+                        <span className="col-span-3">Severity</span>
+                        <span className="col-span-4">Reaction</span>
+                    </div>
                     {data.map((item, idx) => (
-                        <div key={idx} className="p-6 bg-white rounded-3xl border-2 border-slate-50 relative overflow-hidden group">
+                        <div
+                            key={idx}
+                            className="grid grid-cols-12 items-start gap-3 p-5 bg-white rounded-3xl border-2 border-slate-50 relative overflow-hidden group break-words"
+                        >
                             <div className={`absolute top-0 left-0 w-2 h-full ${item.severity === 'CRITICAL' ? 'bg-red-500' : 'bg-amber-400'}`} />
-                            <p className="font-black text-slate-800 text-xl mb-1">{item.name}</p>
-                            <span className="text-[10px] font-black uppercase bg-slate-100 px-2 py-0.5 rounded-full text-slate-500 tracking-widest">{item.severity} SEVERITY</span>
-                            <p className="mt-3 text-sm text-slate-500 font-medium italic">"{item.notes || 'No specific notes provided'}"</p>
+                            <div className="col-span-5 font-black text-slate-800 leading-snug">{item.name}</div>
+                            <div className="col-span-3 text-sm font-black text-slate-600 uppercase tracking-wide">{item.severity}</div>
+                            <div className="col-span-4 text-sm text-slate-600 leading-relaxed">{item.notes || 'No specific notes provided'}</div>
                         </div>
                     ))}
                 </div>
@@ -312,13 +456,22 @@ function AllergyList({ data }: { data: any[] }) {
 function SurgeryList({ data }: { data: any[] }) {
     return (
         <div className="glass-card p-8 border-white/40 min-h-[400px]">
-            <h2 className="text-2xl font-black text-slate-800 mb-8 flex items-center gap-2">
-                <Building2 className="w-6 h-6 text-emerald-500" /> Surgical History
-            </h2>
+            <div className="flex items-center justify-between mb-8 border-b pb-4 border-slate-100">
+                <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
+                    <Building2 className="w-6 h-6 text-emerald-500" /> Surgical History
+                </h2>
+                <button
+                    onClick={() => document.dispatchEvent(new CustomEvent('openModal', { detail: { type: 'operations' } }))}
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 transition-all"
+                >
+                    <Plus className="w-4 h-4" />
+                    Add
+                </button>
+            </div>
             {data.length === 0 ? <NoData text="No operations recorded." /> : (
                 <div className="space-y-4">
                     {data.map((item, idx) => (
-                        <div key={idx} className="p-6 bg-slate-50/50 rounded-3xl border border-slate-200/50 flex items-start gap-5">
+                        <div key={idx} className="p-6 bg-slate-50/50 rounded-3xl border border-slate-200/50 flex items-start gap-5 break-words">
                             <div className="w-12 h-12 rounded-2xl bg-white shadow-sm flex items-center justify-center shrink-0 border border-slate-100">
                                 <Activity className="w-6 h-6 text-emerald-500" />
                             </div>
@@ -338,11 +491,20 @@ function SurgeryList({ data }: { data: any[] }) {
 function LabList({ data }: { data: any[] }) {
     return (
         <div className="glass-card p-8 border-white/40 min-h-[400px]">
-            <h2 className="text-2xl font-black text-slate-800 mb-8">Lab & Diagnostics</h2>
+            <div className="flex items-center justify-between mb-8 border-b pb-4 border-slate-100">
+                <h2 className="text-2xl font-black text-slate-800">Lab & Diagnostics</h2>
+                <button
+                    onClick={() => document.dispatchEvent(new CustomEvent('openModal', { detail: { type: 'labResults' } }))}
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 transition-all"
+                >
+                    <Plus className="w-4 h-4" />
+                    Add
+                </button>
+            </div>
             {data.length === 0 ? <NoData text="No lab results found." /> : (
                 <div className="grid grid-cols-1 gap-4">
                     {data.map((item, idx) => (
-                        <div key={idx} className="p-6 bg-emerald-50/20 rounded-3xl border border-emerald-100/50 flex flex-col md:flex-row justify-between md:items-center gap-4">
+                        <div key={idx} className="p-6 bg-emerald-50/20 rounded-3xl border border-emerald-100/50 flex flex-col md:flex-row justify-between md:items-center gap-4 break-words">
                             <div className="flex items-center gap-4">
                                 <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center">
                                     <History className="w-6 h-6 text-emerald-500" />
