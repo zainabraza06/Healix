@@ -99,12 +99,7 @@ export const getPatientDashboardData = async (userId) => {
         populate: { path: 'user_id', select: 'full_name' }
       }).sort({ appointment_date: 1 }).limit(5).lean()),
       Alert.find({
-        patient_id: patient._id,
-        status: 'ACTIVE',
-        $or: [
-          { expires_at: { $exists: false } },
-          { expires_at: { $gte: now } }
-        ]
+        patient_id: patient._id
       }).populate({
         path: 'doctor_id',
         populate: { path: 'user_id', select: 'full_name' }

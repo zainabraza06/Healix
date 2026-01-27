@@ -33,6 +33,12 @@ const alertSchema = new mongoose.Schema(
       enum: ['ACTIVE', 'RESOLVED', 'ACKNOWLEDGED'],
       default: 'ACTIVE',
     },
+    instructions: {
+      type: String,
+    },
+    prescription: {
+      type: String,
+    },
     expires_at: Date,
     resolved_at: Date,
     resolved_by: {
