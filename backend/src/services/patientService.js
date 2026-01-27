@@ -166,6 +166,8 @@ export const getPatientAlerts = async (userId, page = 0, size = 10, status) => {
       resolved_at: a.resolved_at,
       status: a.status,
       severity: a.severity,
+      instructions: a.instructions,
+      prescription: a.prescription,
     }));
 
     return {

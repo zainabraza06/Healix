@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '@/lib/apiClient';
 import ProtectedLayout from '@/components/ProtectedLayout';
-import { Loader, ArrowLeft, User, Stethoscope, Calendar, ShieldAlert, X, CheckCircle, Activity, Download, FileText, Database, Code } from 'lucide-react';
+import { Loader, ArrowLeft, User, Stethoscope, Calendar, ShieldAlert, X, CheckCircle, Activity, Download, FileText, Database, Code, Edit } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 
@@ -19,6 +19,8 @@ interface Alert {
     patient_name?: string;
     doctor_id?: string;
     doctor_name?: string;
+    instructions?: string;
+    prescription?: string;
 }
 
 export default function AdminAlertsPage() {
@@ -115,7 +117,7 @@ export default function AdminAlertsPage() {
                             </button>
                             <div>
                                 <h1 className="text-4xl font-bold text-slate-800">System Alerts</h1>
-                                <p className="text-slate-600 mt-2">{totalElements} active and historical alerts</p>
+                                <p className="text-slate-600 mt-2">{totalElements} alerts (current filter)</p>
                             </div>
                         </div>
                         
@@ -277,6 +279,74 @@ export default function AdminAlertsPage() {
                                 </button>
                             </div>
                             <div className="p-6 space-y-6">
+                                {/* Doctor's Resolution - Instructions and Prescription */}
+                                {selectedAlert.status === 'RESOLVED' && (selectedAlert.instructions || selectedAlert.prescription) && (
+                                    <div className="space-y-4">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <CheckCircle className="w-6 h-6 text-emerald-600" />
+                                            <h4 className="text-lg font-bold text-emerald-800">Alert Resolved</h4>
+                                        </div>
+                                        {selectedAlert.instructions && (
+                                            <div className="bg-emerald-50 p-6 rounded-2xl border-2 border-emerald-200">
+                                                <div className="flex items-center gap-2 mb-3">
+                                                    <Stethoscope className="w-5 h-5 text-emerald-700" />
+                                                    <h5 className="text-sm font-bold text-emerald-900 uppercase tracking-wider">Doctor's Instructions</h5>
+                                                </div>
+                                                <p className="text-sm text-emerald-900 leading-relaxed whitespace-pre-wrap font-medium">
+                                                    {selectedAlert.instructions}
+                                                </p>
+                                            </div>
+                                        )}
+                                        {selectedAlert.prescription && (
+                                            <div className="bg-emerald-50 p-6 rounded-2xl border-2 border-emerald-200">
+                                                <div className="flex items-center gap-2 mb-3">
+                                                    <Activity className="w-5 h-5 text-emerald-700" />
+                                                    <h5 className="text-sm font-bold text-emerald-900 uppercase tracking-wider">Prescription</h5>
+                                                </div>
+                                                {typeof selectedAlert.prescription === 'string' && selectedAlert.prescription.startsWith('[') ? (
+                                                    (() => {
+                                                        try {
+                                                            const medications = JSON.parse(selectedAlert.prescription);
+                                                            return (
+                                                                <div className="space-y-3">
+                                                                    {medications.map((med: any, idx: number) => (
+                                                                        <div key={idx} className="bg-white p-3 rounded-lg border border-emerald-100">
+                                                                            <h6 className="font-bold text-emerald-900 mb-2">{med.name}</h6>
+                                                                            <div className="grid grid-cols-2 gap-2 text-xs text-emerald-800">
+                                                                                <div>
+                                                                                    <p className="font-semibold text-emerald-700">Dosage</p>
+                                                                                    <p>{med.dosage}</p>
+                                                                                </div>
+                                                                                <div>
+                                                                                    <p className="font-semibold text-emerald-700">Frequency</p>
+                                                                                    <p>{med.frequency}</p>
+                                                                                </div>
+                                                                                <div className="col-span-2">
+                                                                                    <p className="font-semibold text-emerald-700">Duration</p>
+                                                                                    <p>{med.duration}</p>
+                                                                                </div>
+                                                                            </div>
+                                                                            {med.instructions && (
+                                                                                <p className="text-xs text-emerald-700 mt-2 italic">{med.instructions}</p>
+                                                                            )}
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            );
+                                                        } catch (e) {
+                                                            return <p className="text-sm text-emerald-900 leading-relaxed whitespace-pre-wrap font-medium">{selectedAlert.prescription}</p>;
+                                                        }
+                                                    })()
+                                                ) : (
+                                                    <p className="text-sm text-emerald-900 leading-relaxed whitespace-pre-wrap font-medium">
+                                                        {selectedAlert.prescription}
+                                                    </p>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
                                 {(() => {
                                     const lines = (selectedAlert.message || '').split('\n').filter((l: string) => l.trim());
                                     let issuesText = '';
@@ -333,7 +403,7 @@ export default function AdminAlertsPage() {
                                             )}
 
                                             {/* Doctor Consultation Status */}
-                                            {selectedAlert.doctor_name && (
+                                            {selectedAlert.doctor_name && selectedAlert.status !== 'RESOLVED' && (
                                                 <div className="p-4 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl text-white shadow-lg">
                                                     <div className="flex items-center gap-3 mb-2">
                                                         <Stethoscope className="w-5 h-5" />

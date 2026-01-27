@@ -50,6 +50,28 @@ export const offCriticalVitals = (handler?: (data: any) => void) => {
   else socket.off('criticalVitals');
 };
 
+export const onAlertAssigned = (handler: (data: any) => void) => {
+  if (!socket) return;
+  socket.on('alert:assigned', handler);
+};
+
+export const offAlertAssigned = (handler?: (data: any) => void) => {
+  if (!socket) return;
+  if (handler) socket.off('alert:assigned', handler);
+  else socket.off('alert:assigned');
+};
+
+export const onAlertResolved = (handler: (data: any) => void) => {
+  if (!socket) return;
+  socket.on('alert:resolved', handler);
+};
+
+export const offAlertResolved = (handler?: (data: any) => void) => {
+  if (!socket) return;
+  if (handler) socket.off('alert:resolved', handler);
+  else socket.off('alert:resolved');
+};
+
 export const emitChatMessage = (payload: { senderId: string; recipientId: string; message: any }) => {
   if (!socket) return;
   socket.emit('chat:send', payload);

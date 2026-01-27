@@ -10,6 +10,10 @@ const alertSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Doctor',
     },
+    prescription_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Prescription',
+    },
     alert_type: {
       type: String,
       enum: ['CRITICAL', 'WARNING', 'INFO'],
