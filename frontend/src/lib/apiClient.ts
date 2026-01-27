@@ -155,6 +155,13 @@ class ApiClient {
     return response.data;
   }
 
+  async downloadMedicalRecord(patientId: string): Promise<Blob> {
+    const response = await this.client.get(`/medical-records/${patientId}/download`, {
+      responseType: 'blob',
+    });
+    return response.data as Blob;
+  }
+
   async addMedicalRecordEntry(type: string, data: any): Promise<ApiResponse<any>> {
     const response = await this.client.post(`/patient/medical-records/${type}`, data);
     return response.data;

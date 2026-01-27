@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { apiClient } from '@/lib/apiClient';
 import ProtectedLayout from '@/components/ProtectedLayout';
 import toast from 'react-hot-toast';
-import { Bell, CheckCircle, Clock, X, Edit, Loader, AlertCircle, Activity, User, Calendar, Stethoscope } from 'lucide-react';
+import { Bell, CheckCircle, Clock, X, Edit, Loader, AlertCircle, Activity, User, Calendar, Stethoscope, Download } from 'lucide-react';
 import Spinner from '@/components/Spinner';
 import EmptyState from '@/components/EmptyState';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -23,6 +23,7 @@ export default function DoctorAlertsPage() {
   });
   const [resolving, setResolving] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const pageSize = 10;
 
   useEffect(() => {
@@ -114,6 +115,35 @@ export default function DoctorAlertsPage() {
     }
   };
 
+  const handleDownloadRecord = async (
+    patientId?: string,
+    patientName?: string,
+    e?: React.MouseEvent
+  ) => {
+    if (e) e.stopPropagation();
+    if (!patientId) {
+      toast.error('Patient ID missing for this alert');
+      return;
+    }
+    try {
+      setDownloadingId(patientId);
+      const blob = await apiClient.downloadMedicalRecord(patientId);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const safeName = (patientName || patientId).replace(/\s+/g, '_');
+      link.download = `medical_record_${safeName}.pdf`;
+      link.click();
+      window.URL.revokeObjectURL(url);
+      toast.success('Medical record downloaded');
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to download medical record');
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
   if (isLoading && !alerts) {
     return (
       <ProtectedLayout allowedRoles={['DOCTOR']}>
@@ -177,6 +207,7 @@ export default function DoctorAlertsPage() {
           <div className="glass-card overflow-hidden">
             <div className="grid divide-y divide-slate-200">
               {alerts.content.map((alert: any) => {
+                const patientId = alert.patientId || alert.patient_id || alert.patient?._id;
                 const getSeverityColor = (severity: string) => {
                   switch (severity?.toUpperCase()) {
                     case 'CRITICAL': return 'bg-red-200 text-red-900 border-red-300';
@@ -231,6 +262,23 @@ export default function DoctorAlertsPage() {
                     <div className="flex items-center gap-1.5 text-xs text-slate-500 mb-2">
                       <Calendar className="w-4 h-4" />
                       <span>{new Date(alert.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      {patientId && (
+                        <button
+                          onClick={(e) => handleDownloadRecord(patientId, alert.patientName, e)}
+                          disabled={downloadingId === patientId}
+                          className="px-3 py-2 text-[11px] font-semibold rounded-lg border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 flex items-center gap-1 disabled:opacity-60"
+                        >
+                          {downloadingId === patientId ? (
+                            <Loader className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Download className="w-4 h-4" />
+                          )}
+                          Download record
+                        </button>
+                      )}
                     </div>
 
                     <p className="text-xs text-slate-400 italic">Click to view full details{alert.status === 'RESOLVED' && (alert.instructions || alert.prescription) ? ' including your instructions' : ''}</p>
@@ -471,6 +519,19 @@ export default function DoctorAlertsPage() {
                       )}
 
                       <div className="flex gap-3 pt-6 border-t border-slate-100">
+                        {(() => {
+                          const patientId = alert.patientId || alert.patient_id || alert.patient?._id;
+                          return patientId ? (
+                            <button
+                              onClick={(e) => handleDownloadRecord(patientId, alert.patientName, e)}
+                              disabled={downloadingId === patientId}
+                              className="flex-1 h-12 bg-slate-100 text-slate-700 font-black uppercase tracking-widest text-xs rounded-xl hover:bg-slate-200 transition-all flex items-center justify-center gap-2"
+                            >
+                              {downloadingId === patientId ? <Loader className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                              Download record
+                            </button>
+                          ) : null;
+                        })()}
                         {/* Show resolve button for active alerts */}
                         {alert.status === 'ACTIVE' && (
                           <button

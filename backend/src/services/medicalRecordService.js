@@ -33,6 +33,8 @@ export const getPatientMedicalRecords = async (userId) => {
                 .sort({ appointment_date: -1 })
                 .lean(),
             Alert.find({ patient_id: patient._id })
+                .populate({ path: 'doctor_id', populate: { path: 'user_id', select: 'full_name' } })
+                .populate({ path: 'resolved_by', select: 'full_name' })
                 .populate('prescription_id')
                 .sort({ created_at: -1 })
                 .lean()
@@ -57,7 +59,12 @@ export const getPatientMedicalRecords = async (userId) => {
                     date: a.created_at,
                     status: a.status,
                     instructions: a.instructions || null,
-                    prescription: a.prescription_id || null
+                    prescription: a.prescription_id || null,
+                    doctorName: a.doctor_id?.user_id?.full_name || 'Doctor',
+                    resolvedAt: a.resolved_at || null,
+                    resolvedBy: a.resolved_by || null,
+                    resolvedByName: a.resolved_by?.full_name || null,
+                    expiresAt: a.expires_at || null
                 }))
             }
         };
@@ -106,6 +113,8 @@ export const generateMedicalRecordsPDF = async (patientId, res) => {
             bufferPages: false
         });
 
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="medical-record-${patientId}.pdf"`);
         doc.pipe(res);
 
         // -- Page Setup --
@@ -123,6 +132,16 @@ export const generateMedicalRecordsPDF = async (patientId, res) => {
             border: '#cbd5e1',
             bg: '#f8fafc',
             headerBg: '#ecfdf5'
+        };
+
+        // Helper to check if we need a new page
+        const checkPageBreak = (requiredHeight = 100) => {
+            if (doc.y + requiredHeight > doc.page.height - MARGIN) {
+                doc.addPage();
+                drawBranding();
+                return true;
+            }
+            return false;
         };
 
         // Helper: Draw Header Branding
@@ -143,18 +162,48 @@ export const generateMedicalRecordsPDF = async (patientId, res) => {
 
         // Helper: Draw Section Title
         const drawSectionTitle = (title) => {
+            checkPageBreak(40);
             doc.moveDown(1);
-            doc.rect(MARGIN, doc.y, CONTENT_WIDTH, 25).fill(COLORS.headerBg).stroke(COLORS.border);
-            doc.fillColor(COLORS.teal).fontSize(13).font('Helvetica-Bold').text(title.toUpperCase(), MARGIN + 10, doc.y + 7);
-            doc.moveDown(2.5);
+            const sectionY = doc.y;
+            doc.rect(MARGIN, sectionY, CONTENT_WIDTH, 25).fill(COLORS.headerBg).stroke(COLORS.border);
+            doc.fillColor(COLORS.teal).fontSize(13).font('Helvetica-Bold').text(title.toUpperCase(), MARGIN + 10, sectionY + 7);
+            doc.y = sectionY + 35;
         };
 
         // Helper: Draw Table Row (for data display)
         const drawTableRow = (label, value, labelWidth = 150) => {
+            checkPageBreak(30);
             const currentY = doc.y;
             doc.fillColor(COLORS.slate600).fontSize(10).font('Helvetica-Bold').text(label, MARGIN, currentY, { width: labelWidth, align: 'left' });
             doc.fillColor(COLORS.slate800).fontSize(10).font('Helvetica').text(value || 'N/A', MARGIN + labelWidth + 10, currentY, { width: CONTENT_WIDTH - labelWidth - 10, align: 'left', lineGap: 3 });
-            doc.moveDown(0.8);
+            doc.y = currentY + 15;
+        };
+
+        // Helper: Draw Table with dynamic rows
+        const drawTable = (headers, rows, columnWidths, rowRenderer) => {
+            checkPageBreak(60);
+            const headerY = doc.y;
+            
+            // Draw header
+            doc.rect(MARGIN, headerY, CONTENT_WIDTH, 25).fill(COLORS.headerBg).stroke(COLORS.border);
+            let xPos = MARGIN + 8;
+            headers.forEach((header, index) => {
+                doc.fillColor(COLORS.slate800).fontSize(10).font('Helvetica-Bold');
+                doc.text(header, xPos, headerY + 8, { width: columnWidths[index] });
+                xPos += columnWidths[index] + 10;
+            });
+            
+            doc.y = headerY + 35;
+            
+            // Draw rows
+            rows.forEach((row, index) => {
+                checkPageBreak(35);
+                const rowY = doc.y;
+                rowRenderer(row, rowY);
+                doc.y = rowY + 35;
+            });
+            
+            doc.moveDown(0.5);
         };
 
         // -- First Page Content --
@@ -177,202 +226,369 @@ export const generateMedicalRecordsPDF = async (patientId, res) => {
         drawSectionTitle('Clinical History & Immunizations');
 
         if (records.immunizations.length === 0) {
+            checkPageBreak(30);
             doc.fillColor(COLORS.slate400).fontSize(10).text('No recorded immunizations.', MARGIN + 10);
-            doc.moveDown(0.5);
+            doc.y += 15;
         } else {
-            // Table headers
-            doc.rect(MARGIN, doc.y, CONTENT_WIDTH, 20).fill(COLORS.headerBg).stroke(COLORS.border);
-            doc.fillColor(COLORS.slate800).fontSize(9).font('Helvetica-Bold');
-            doc.text('Vaccine Name', MARGIN + 8, doc.y + 6, { width: 200 });
-            doc.text('Date', MARGIN + 220, doc.y + 6, { width: 80 });
-            doc.text('Notes', MARGIN + 310, doc.y + 6, { width: CONTENT_WIDTH - 318 });
-            doc.moveDown(2.2);
-
-            // Table rows
-            records.immunizations.forEach((item) => {
-                const rowHeight = 25;
-                doc.rect(MARGIN, doc.y, CONTENT_WIDTH, rowHeight).stroke(COLORS.border);
-                doc.fillColor(COLORS.slate800).fontSize(9).font('Helvetica');
-                doc.text(item.name, MARGIN + 8, doc.y + 5, { width: 200, height: rowHeight - 10 });
-                doc.text(new Date(item.date).toLocaleDateString(), MARGIN + 220, doc.y - (rowHeight - 10) + 5, { width: 80, height: rowHeight - 10 });
-                doc.text(item.notes || '-', MARGIN + 310, doc.y - (rowHeight - 10) + 5, { width: CONTENT_WIDTH - 318, height: rowHeight - 10 });
-                doc.moveDown(2.2);
-            });
+            drawTable(
+                ['Vaccine Name', 'Date', 'Notes'],
+                records.immunizations,
+                [200, 80, CONTENT_WIDTH - 318],
+                (item, rowY) => {
+                    doc.rect(MARGIN, rowY, CONTENT_WIDTH, 30).stroke(COLORS.border);
+                    doc.fillColor(COLORS.slate800).fontSize(10).font('Helvetica');
+                    doc.text(item.name, MARGIN + 8, rowY + 10, { width: 200 });
+                    doc.text(new Date(item.date).toLocaleDateString(), MARGIN + 220, rowY + 10, { width: 80 });
+                    doc.text(item.notes || '-', MARGIN + 310, rowY + 10, { width: CONTENT_WIDTH - 318 });
+                }
+            );
         }
 
         drawSectionTitle('Active Allergies');
         if (records.allergies.length === 0) {
+            checkPageBreak(30);
             doc.fillColor(COLORS.slate400).fontSize(10).text('No recorded allergies.', MARGIN + 10);
-            doc.moveDown(0.5);
+            doc.y += 15;
         } else {
-            // Table headers
-            doc.rect(MARGIN, doc.y, CONTENT_WIDTH, 20).fill(COLORS.headerBg).stroke(COLORS.border);
-            doc.fillColor(COLORS.slate800).fontSize(9).font('Helvetica-Bold');
-            doc.text('Allergen', MARGIN + 8, doc.y + 6, { width: 250 });
-            doc.text('Severity', MARGIN + 270, doc.y + 6, { width: 100 });
-            doc.text('Reaction', MARGIN + 380, doc.y + 6, { width: CONTENT_WIDTH - 388 });
-            doc.moveDown(2.2);
-
-            // Table rows
-            records.allergies.forEach((item) => {
-                const rowHeight = 25;
-                const severityColor = item.severity === 'HIGH' ? '#ef4444' : (item.severity === 'MEDIUM' ? '#f59e0b' : COLORS.teal);
-                doc.rect(MARGIN, doc.y, CONTENT_WIDTH, rowHeight).stroke(COLORS.border);
-                doc.fillColor(COLORS.slate800).fontSize(9).font('Helvetica');
-                doc.text(item.name, MARGIN + 8, doc.y + 5, { width: 250, height: rowHeight - 10 });
-                doc.fillColor(severityColor).fontSize(8).font('Helvetica-Bold');
-                doc.text(item.severity, MARGIN + 270, doc.y - (rowHeight - 10) + 5, { width: 100, height: rowHeight - 10 });
-                doc.fillColor(COLORS.slate800).fontSize(9).font('Helvetica');
-                doc.text(item.reaction || '-', MARGIN + 380, doc.y - (rowHeight - 10) + 5, { width: CONTENT_WIDTH - 388, height: rowHeight - 10 });
-                doc.moveDown(2.2);
-            });
+            drawTable(
+                ['Allergen', 'Severity', 'Reaction'],
+                records.allergies,
+                [250, 100, CONTENT_WIDTH - 388],
+                (item, rowY) => {
+                    doc.rect(MARGIN, rowY, CONTENT_WIDTH, 30).stroke(COLORS.border);
+                    const severityColor = item.severity === 'HIGH' ? '#ef4444' : (item.severity === 'MEDIUM' ? '#f59e0b' : COLORS.teal);
+                    doc.fillColor(COLORS.slate800).fontSize(10).font('Helvetica');
+                    doc.text(item.name, MARGIN + 8, rowY + 10, { width: 250 });
+                    doc.fillColor(severityColor).fontSize(9).font('Helvetica-Bold');
+                    doc.text(item.severity, MARGIN + 270, rowY + 10, { width: 100 });
+                    doc.fillColor(COLORS.slate800).fontSize(10).font('Helvetica');
+                    doc.text(item.reaction || '-', MARGIN + 380, rowY + 10, { width: CONTENT_WIDTH - 388 });
+                }
+            );
         }
 
         drawSectionTitle('Major Operations & Surgeries');
         if (records.operations.length === 0) {
+            checkPageBreak(30);
             doc.fillColor(COLORS.slate400).fontSize(10).text('No recorded major operations.', MARGIN + 10);
-            doc.moveDown(0.5);
+            doc.y += 15;
         } else {
-            // Table headers
-            doc.rect(MARGIN, doc.y, CONTENT_WIDTH, 20).fill(COLORS.headerBg).stroke(COLORS.border);
-            doc.fillColor(COLORS.slate800).fontSize(9).font('Helvetica-Bold');
-            doc.text('Operation Name', MARGIN + 8, doc.y + 6, { width: 200 });
-            doc.text('Date', MARGIN + 220, doc.y + 6, { width: 80 });
-            doc.text('Hospital', MARGIN + 310, doc.y + 6, { width: CONTENT_WIDTH - 318 });
-            doc.moveDown(2.2);
-
-            // Table rows
-            records.operations.forEach((item) => {
-                const rowHeight = 25;
-                doc.rect(MARGIN, doc.y, CONTENT_WIDTH, rowHeight).stroke(COLORS.border);
-                doc.fillColor(COLORS.slate800).fontSize(9).font('Helvetica');
-                doc.text(item.name, MARGIN + 8, doc.y + 5, { width: 200, height: rowHeight - 10 });
-                doc.text(new Date(item.date).toLocaleDateString(), MARGIN + 220, doc.y - (rowHeight - 10) + 5, { width: 80, height: rowHeight - 10 });
-                doc.text(item.hospital || '-', MARGIN + 310, doc.y - (rowHeight - 10) + 5, { width: CONTENT_WIDTH - 318, height: rowHeight - 10 });
-                doc.moveDown(2.2);
-            });
+            drawTable(
+                ['Operation Name', 'Date', 'Hospital'],
+                records.operations,
+                [200, 80, CONTENT_WIDTH - 318],
+                (item, rowY) => {
+                    doc.rect(MARGIN, rowY, CONTENT_WIDTH, 30).stroke(COLORS.border);
+                    doc.fillColor(COLORS.slate800).fontSize(10).font('Helvetica');
+                    doc.text(item.name, MARGIN + 8, rowY + 10, { width: 200 });
+                    doc.text(new Date(item.date).toLocaleDateString(), MARGIN + 220, rowY + 10, { width: 80 });
+                    doc.text(item.hospital || '-', MARGIN + 310, rowY + 10, { width: CONTENT_WIDTH - 318 });
+                }
+            );
         }
 
-        // 3. Lab Results & Records (Second Page)
+        // Start new page for remaining content
         doc.addPage();
         drawBranding();
 
+        // 3. Lab Results
         drawSectionTitle('Laboratory Results');
         if (records.labResults.length === 0) {
+            checkPageBreak(30);
             doc.fillColor(COLORS.slate400).fontSize(10).text('No recorded lab results.', MARGIN + 10);
-            doc.moveDown(0.5);
+            doc.y += 15;
         } else {
-            // Table headers
-            doc.rect(MARGIN, doc.y, CONTENT_WIDTH, 20).fill(COLORS.headerBg).stroke(COLORS.border);
-            doc.fillColor(COLORS.slate800).fontSize(9).font('Helvetica-Bold');
-            doc.text('Test Name', MARGIN + 8, doc.y + 6, { width: 200 });
-            doc.text('Result', MARGIN + 220, doc.y + 6, { width: 100 });
-            doc.text('Unit', MARGIN + 330, doc.y + 6, { width: 70 });
-            doc.text('Date', MARGIN + 410, doc.y + 6, { width: CONTENT_WIDTH - 418 });
-            doc.moveDown(2.2);
-
-            // Table rows
-            records.labResults.forEach((item) => {
-                const rowHeight = 25;
-                doc.rect(MARGIN, doc.y, CONTENT_WIDTH, rowHeight).stroke(COLORS.border);
-                doc.fillColor(COLORS.slate800).fontSize(9).font('Helvetica');
-                doc.text(item.testName, MARGIN + 8, doc.y + 5, { width: 200, height: rowHeight - 10 });
-                doc.text(item.result, MARGIN + 220, doc.y - (rowHeight - 10) + 5, { width: 100, height: rowHeight - 10 });
-                doc.text(item.unit || '-', MARGIN + 330, doc.y - (rowHeight - 10) + 5, { width: 70, height: rowHeight - 10 });
-                doc.text(new Date(item.date).toLocaleDateString(), MARGIN + 410, doc.y - (rowHeight - 10) + 5, { width: CONTENT_WIDTH - 418, height: rowHeight - 10 });
-                doc.moveDown(2.2);
-            });
+            drawTable(
+                ['Test Name', 'Result', 'Unit', 'Date'],
+                records.labResults,
+                [200, 100, 70, CONTENT_WIDTH - 418],
+                (item, rowY) => {
+                    doc.rect(MARGIN, rowY, CONTENT_WIDTH, 30).stroke(COLORS.border);
+                    doc.fillColor(COLORS.slate800).fontSize(10).font('Helvetica');
+                    doc.text(item.testName, MARGIN + 8, rowY + 10, { width: 200 });
+                    doc.text(item.result, MARGIN + 220, rowY + 10, { width: 100 });
+                    doc.text(item.unit || '-', MARGIN + 330, rowY + 10, { width: 70 });
+                    doc.text(new Date(item.date).toLocaleDateString(), MARGIN + 410, rowY + 10, { width: CONTENT_WIDTH - 418 });
+                }
+            );
         }
 
+        // 4. Alerts with proper color themes and subheadings
         drawSectionTitle('Recent Alerts & Notifications');
         if (records.history.alerts.length === 0) {
+            checkPageBreak(30);
             doc.fillColor(COLORS.slate400).fontSize(10).text('No alerts in record.', MARGIN + 10);
-            doc.moveDown(0.5);
+            doc.y += 15;
         } else {
-            // Table headers
-            doc.rect(MARGIN, doc.y, CONTENT_WIDTH, 20).fill(COLORS.headerBg).stroke(COLORS.border);
-            doc.fillColor(COLORS.slate800).fontSize(9).font('Helvetica-Bold');
-            doc.text('Severity', MARGIN + 8, doc.y + 6, { width: 80 });
-            doc.text('Message', MARGIN + 100, doc.y + 6, { width: 180 });
-            doc.text('Status', MARGIN + 290, doc.y + 6, { width: 80 });
-            doc.text('Date', MARGIN + 380, doc.y + 6, { width: CONTENT_WIDTH - 388 });
-            doc.moveDown(2.2);
-
-            // Table rows (Show recent 5 alerts)
-            records.history.alerts.slice(0, 5).forEach((item) => {
-                const rowHeight = 35;
-                const severityColor = item.severity === 'CRITICAL' ? '#ef4444' : (item.severity === 'HIGH' ? '#f59e0b' : COLORS.teal);
-                doc.rect(MARGIN, doc.y, CONTENT_WIDTH, rowHeight).stroke(COLORS.border);
-                doc.fillColor(severityColor).fontSize(8).font('Helvetica-Bold');
-                doc.text(item.severity, MARGIN + 8, doc.y + 8, { width: 80, height: rowHeight - 10 });
-                doc.fillColor(COLORS.slate800).fontSize(8).font('Helvetica');
-                doc.text(item.message, MARGIN + 100, doc.y + 8, { width: 180, height: rowHeight - 10 });
-                doc.fillColor(COLORS.slate600).fontSize(8).font('Helvetica-Bold');
-                doc.text(item.status, MARGIN + 290, doc.y + 8, { width: 80, height: rowHeight - 10 });
-                doc.fillColor(COLORS.slate600).fontSize(8).font('Helvetica');
-                doc.text(new Date(item.date).toLocaleDateString(), MARGIN + 380, doc.y + 8, { width: CONTENT_WIDTH - 388, height: rowHeight - 10 });
+            records.history.alerts.forEach((alert, index) => {
+                // Calculate required height for this alert
+                doc.font('Helvetica').fontSize(9);
+                const messageHeight = alert.message ? doc.heightOfString(alert.message, { width: CONTENT_WIDTH - 50 }) + 15 : 0;
+                const instructionsHeight = alert.instructions ? doc.heightOfString(alert.instructions, { width: CONTENT_WIDTH - 50 }) + 25 : 0;
                 
-                // Show resolved alert details if available
-                if (item.status === 'RESOLVED' && (item.instructions || item.prescription)) {
-                    doc.moveDown(3.5);
-                    if (item.instructions) {
-                        doc.fillColor(COLORS.slate600).fontSize(8).font('Helvetica-Bold');
-                        doc.text('Instructions:', MARGIN + 20, doc.y, { width: 150 });
-                        doc.fillColor(COLORS.slate700).fontSize(8).font('Helvetica');
-                        doc.text(item.instructions, MARGIN + 20, doc.y + 12, { width: CONTENT_WIDTH - 40 });
-                    }
-                    if (item.prescription && item.prescription.medications && item.prescription.medications.length > 0) {
-                        doc.moveDown(0.8);
-                        doc.fillColor(COLORS.slate600).fontSize(8).font('Helvetica-Bold');
-                        doc.text('Prescriptions:', MARGIN + 20, doc.y, { width: 150 });
-                        doc.fillColor(COLORS.slate700).fontSize(8).font('Helvetica');
-                        item.prescription.medications.forEach((med, idx) => {
-                            const medText = `${idx + 1}. ${med.name} - ${med.dosage}, ${med.frequency} for ${med.duration}`;
-                            doc.text(medText, MARGIN + 30, doc.y + 12 + (idx * 14), { width: CONTENT_WIDTH - 50 });
-                        });
-                    }
+                // Calculate meds height
+                let medsHeight = 0;
+                if (alert.prescription?.medications?.length > 0) {
+                    medsHeight = 25; // For the "Prescribed Medications:" heading
+                    alert.prescription.medications.forEach(med => {
+                        const medText = `• ${med.name} - ${med.dosage}, ${med.frequency} for ${med.duration}`;
+                        medsHeight += doc.heightOfString(medText, { width: CONTENT_WIDTH - 60 }) + 5;
+                    });
                 }
-                doc.moveDown(3.5);
-            });
-        }
+                
+                const totalHeight = 40 + messageHeight + instructionsHeight + medsHeight + 20;
 
-        drawSectionTitle('Completed Appointments & Prescriptions');
-        if (records.history.completedAppointments.length === 0) {
-            doc.fillColor(COLORS.slate400).fontSize(10).text('No completed appointments.', MARGIN + 10);
-            doc.moveDown(0.5);
-        } else {
-            records.history.completedAppointments.forEach((apt) => {
-                doc.fillColor(COLORS.slate800).fontSize(10).font('Helvetica-Bold');
-                doc.text(`Dr. ${apt.doctorName} - ${apt.type}`, MARGIN, doc.y);
+                checkPageBreak(totalHeight + 20);
+
+                const alertY = doc.y;
+                const severityColor = getSeverityColor(alert.severity);
+
+                // Alert container with subtle border
+                doc.rect(MARGIN, alertY, CONTENT_WIDTH, totalHeight)
+                   .fillAndStroke('#ffffff', COLORS.border);
+                
+                // Alert header with severity indicator
+                doc.rect(MARGIN, alertY, 5, 25).fill(severityColor);
+                doc.rect(MARGIN + 5, alertY, CONTENT_WIDTH - 5, 25).fill(severityColor + '15');
+                
+                // Alert title and severity
+                doc.fillColor(severityColor).fontSize(11).font('Helvetica-Bold');
+                doc.text(alert.severity, MARGIN + 15, alertY + 8, { width: 80 });
+                
+                doc.fillColor(COLORS.slate800).fontSize(11).font('Helvetica-Bold');
+                const title = alert.title || 'Medical Alert';
+                doc.text(title, MARGIN + 100, alertY + 8, { width: 200 });
+                
+                // Status and date
+                const statusColor = alert.status === 'RESOLVED' ? COLORS.emerald : 
+                                  (alert.status === 'ACTIVE' ? '#f59e0b' : COLORS.slate600);
+                
+                doc.fillColor(statusColor).fontSize(9).font('Helvetica-Bold');
+                doc.text(alert.status, MARGIN + 310, alertY + 8, { width: 80 });
+                
                 doc.fillColor(COLORS.slate600).fontSize(9).font('Helvetica');
-                doc.text(new Date(apt.date).toLocaleDateString(), MARGIN, doc.y + 15);
-                
-                if (apt.notes) {
-                    doc.moveDown(0.5);
-                    doc.fillColor(COLORS.slate600).fontSize(9).font('Helvetica-Bold');
-                    doc.text('Notes:', MARGIN, doc.y);
+                doc.text(new Date(alert.date).toLocaleDateString('en-US', { 
+                    year: 'numeric', 
+                    month: 'short', 
+                    day: 'numeric' 
+                }), MARGIN + 400, alertY + 8, { width: 150 });
+
+                let contentY = alertY + 35;
+
+                // Doctor information
+                if (alert.doctorName) {
                     doc.fillColor(COLORS.slate700).fontSize(9).font('Helvetica');
-                    doc.text(apt.notes, MARGIN + 10, doc.y + 12, { width: CONTENT_WIDTH - 20 });
+                    doc.text(`Issued by: Dr. ${alert.doctorName}`, MARGIN + 15, contentY, { width: CONTENT_WIDTH - 30 });
+                    contentY += 15;
                 }
 
-                if (apt.prescription && apt.prescription.medications && apt.prescription.medications.length > 0) {
-                    doc.moveDown(0.8);
+                // Alert message (with proper subheading)
+                if (alert.message) {
                     doc.fillColor(COLORS.slate600).fontSize(9).font('Helvetica-Bold');
-                    doc.text('Prescriptions:', MARGIN, doc.y);
-                    doc.fillColor(COLORS.slate700).fontSize(9).font('Helvetica');
-                    apt.prescription.medications.forEach((med, idx) => {
-                        const medText = `${idx + 1}. ${med.name} - ${med.dosage}, ${med.frequency} for ${med.duration}`;
-                        doc.text(medText, MARGIN + 10, doc.y + 12 + (idx * 14), { width: CONTENT_WIDTH - 20 });
+                    doc.text('Alert Details:', MARGIN + 15, contentY);
+                    contentY += 12;
+                    
+                    doc.fillColor(COLORS.slate800).fontSize(9).font('Helvetica');
+                    doc.text(alert.message, MARGIN + 25, contentY, { 
+                        width: CONTENT_WIDTH - 50, 
+                        lineGap: 3 
+                    });
+                    contentY += messageHeight;
+                }
+
+                // Instructions (with proper subheading)
+                if (alert.instructions) {
+                    doc.fillColor(COLORS.slate600).fontSize(9).font('Helvetica-Bold');
+                    doc.text('Medical Instructions:', MARGIN + 15, contentY);
+                    contentY += 12;
+                    
+                    doc.fillColor(COLORS.slate800).fontSize(9).font('Helvetica');
+                    doc.text(alert.instructions, MARGIN + 25, contentY, { 
+                        width: CONTENT_WIDTH - 50, 
+                        lineGap: 3 
+                    });
+                    contentY += instructionsHeight - 12;
+                }
+
+                // Prescription (with proper subheading and bullet points)
+                if (alert.prescription?.medications?.length > 0) {
+                    doc.fillColor(COLORS.slate600).fontSize(9).font('Helvetica-Bold');
+                    doc.text('Prescribed Medications:', MARGIN + 15, contentY);
+                    contentY += 15;
+                    
+                    doc.fillColor(COLORS.slate800).fontSize(9).font('Helvetica');
+                    alert.prescription.medications.forEach((med, idx) => {
+                        const medText = `• ${med.name} - ${med.dosage}, ${med.frequency} for ${med.duration}`;
+                        const medHeight = doc.heightOfString(medText, { width: CONTENT_WIDTH - 60 }) + 3;
+                        doc.text(medText, MARGIN + 25, contentY, { 
+                            width: CONTENT_WIDTH - 60,
+                            lineGap: 2 
+                        });
+                        contentY += medHeight;
                     });
                 }
 
-                doc.moveDown(1.5);
-                doc.moveTo(MARGIN, doc.y).lineTo(WIDTH - MARGIN, doc.y).stroke(COLORS.border);
-                doc.moveDown(0.8);
+                // Resolution information (with proper styling)
+                if (alert.status === 'RESOLVED' && (alert.resolvedByName || alert.resolvedAt)) {
+                    contentY += 10;
+                    doc.fillColor(COLORS.emerald).fontSize(8).font('Helvetica-Bold');
+                    doc.text('RESOLUTION DETAILS', MARGIN + 15, contentY);
+                    contentY += 10;
+                    
+                    doc.fillColor(COLORS.slate700).fontSize(9).font('Helvetica');
+                    
+                    if (alert.resolvedByName) {
+                        doc.text(`Resolved by: ${alert.resolvedByName}`, MARGIN + 25, contentY, { width: CONTENT_WIDTH - 50 });
+                        contentY += 12;
+                    }
+                    
+                    if (alert.resolvedAt) {
+                        const resolvedDate = new Date(alert.resolvedAt).toLocaleDateString('en-US', { 
+                            year: 'numeric', 
+                            month: 'short', 
+                            day: 'numeric' 
+                        });
+                        doc.text(`Resolved on: ${resolvedDate}`, MARGIN + 25, contentY, { width: CONTENT_WIDTH - 50 });
+                        contentY += 12;
+                    }
+                }
+
+                // Expiry information (if applicable)
+                if (alert.expiresAt && alert.status === 'ACTIVE') {
+                    const expiryDate = new Date(alert.expiresAt);
+                    const today = new Date();
+                    const daysUntilExpiry = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
+                    
+                    if (daysUntilExpiry >= 0) {
+                        contentY += 10;
+                        const expiryColor = daysUntilExpiry <= 3 ? '#ef4444' : 
+                                          (daysUntilExpiry <= 7 ? '#f59e0b' : COLORS.slate600);
+                        
+                        doc.fillColor(expiryColor).fontSize(8).font('Helvetica-Bold');
+                        doc.text('EXPIRY NOTICE', MARGIN + 15, contentY);
+                        contentY += 10;
+                        
+                        doc.fillColor(COLORS.slate700).fontSize(9).font('Helvetica');
+                        doc.text(`Expires: ${expiryDate.toLocaleDateString()} (in ${daysUntilExpiry} days)`, 
+                               MARGIN + 25, contentY, { width: CONTENT_WIDTH - 50 });
+                    }
+                }
+
+                doc.y = contentY + 15;
+                
+                // Separator line (except for last alert)
+                if (index < records.history.alerts.length - 1) {
+                    doc.moveTo(MARGIN, doc.y).lineTo(WIDTH - MARGIN, doc.y).stroke(COLORS.border);
+                    doc.y += 10;
+                }
             });
         }
 
-        // 4. Verification & Footer
+        // 5. Completed Appointments with proper styling
+        drawSectionTitle('Completed Appointments & Prescriptions');
+        if (records.history.completedAppointments.length === 0) {
+            checkPageBreak(30);
+            doc.fillColor(COLORS.slate400).fontSize(10).text('No completed appointments.', MARGIN + 10);
+            doc.y += 15;
+        } else {
+            records.history.completedAppointments.forEach((apt, index) => {
+                // Calculate required height
+                const notesHeight = apt.notes ? doc.heightOfString(apt.notes, { width: CONTENT_WIDTH - 50 }) + 30 : 0;
+                
+                // Calculate meds height
+                let medsHeight = 0;
+                if (apt.prescription?.medications?.length > 0) {
+                    medsHeight = 25; // For the "Prescriptions:" heading
+                    apt.prescription.medications.forEach(med => {
+                        const medText = `• ${med.name} - ${med.dosage}, ${med.frequency} for ${med.duration}`;
+                        medsHeight += doc.heightOfString(medText, { width: CONTENT_WIDTH - 60 }) + 5;
+                    });
+                }
+                
+                const totalHeight = 40 + notesHeight + medsHeight;
+
+                checkPageBreak(totalHeight + 20);
+
+                const aptY = doc.y;
+                
+                // Appointment container
+                doc.rect(MARGIN, aptY, CONTENT_WIDTH, totalHeight)
+                   .fillAndStroke('#ffffff', COLORS.border);
+                
+                // Appointment header with colored accent
+                doc.rect(MARGIN, aptY, CONTENT_WIDTH, 25).fill(COLORS.teal + '15');
+                doc.rect(MARGIN, aptY, 5, 25).fill(COLORS.teal);
+                
+                // Appointment header text
+                doc.fillColor(COLORS.teal).fontSize(11).font('Helvetica-Bold');
+                doc.text(apt.type.toUpperCase(), MARGIN + 15, aptY + 8, { width: 150 });
+                
+                doc.fillColor(COLORS.slate800).fontSize(11).font('Helvetica-Bold');
+                doc.text(`Dr. ${apt.doctorName}`, MARGIN + 170, aptY + 8, { width: 200 });
+                
+                doc.fillColor(COLORS.slate600).fontSize(9).font('Helvetica');
+                doc.text(new Date(apt.date).toLocaleDateString('en-US', { 
+                    year: 'numeric', 
+                    month: 'short', 
+                    day: 'numeric' 
+                }), MARGIN + 380, aptY + 8, { width: 150 });
+                
+                let contentY = aptY + 35;
+
+                // Notes (with proper subheading)
+                if (apt.notes) {
+                    doc.fillColor(COLORS.slate600).fontSize(9).font('Helvetica-Bold');
+                    doc.text('Clinical Notes:', MARGIN + 15, contentY);
+                    contentY += 12;
+                    
+                    doc.fillColor(COLORS.slate800).fontSize(9).font('Helvetica');
+                    doc.text(apt.notes, MARGIN + 25, contentY, { 
+                        width: CONTENT_WIDTH - 50, 
+                        lineGap: 3 
+                    });
+                    contentY += notesHeight - 12;
+                }
+
+                // Prescriptions (with proper subheading and bullet points)
+                if (apt.prescription?.medications?.length > 0) {
+                    doc.fillColor(COLORS.slate600).fontSize(9).font('Helvetica-Bold');
+                    doc.text('Prescriptions:', MARGIN + 15, contentY);
+                    contentY += 15;
+                    
+                    doc.fillColor(COLORS.slate800).fontSize(9).font('Helvetica');
+                    apt.prescription.medications.forEach((med, idx) => {
+                        const medText = `• ${med.name} - ${med.dosage}, ${med.frequency} for ${med.duration}`;
+                        const medHeight = doc.heightOfString(medText, { width: CONTENT_WIDTH - 60 }) + 3;
+                        doc.text(medText, MARGIN + 25, contentY, { 
+                            width: CONTENT_WIDTH - 60,
+                            lineGap: 2 
+                        });
+                        contentY += medHeight;
+                    });
+                }
+
+                doc.y = contentY + 15;
+                
+                // Separator line (except for last appointment)
+                if (index < records.history.completedAppointments.length - 1) {
+                    doc.moveTo(MARGIN, doc.y).lineTo(WIDTH - MARGIN, doc.y).stroke(COLORS.border);
+                    doc.y += 10;
+                }
+            });
+        }
+
+        // Helper function for severity colors
+        function getSeverityColor(severity) {
+            switch (severity?.toUpperCase()) {
+                case 'CRITICAL': return '#ef4444';
+                case 'HIGH': return '#f59e0b';
+                case 'MEDIUM': return '#3b82f6';
+                case 'LOW': return '#10b981';
+                default: return COLORS.slate600;
+            }
+        }
+
+        // 6. Footer
         doc.moveDown(2);
         doc.moveTo(MARGIN, doc.y).lineTo(WIDTH - MARGIN, doc.y).stroke(COLORS.border);
         

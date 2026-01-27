@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/lib/authStore';
 import { apiClient } from '@/lib/apiClient';
 import ProtectedLayout from '@/components/ProtectedLayout';
-import { Loader, AlertCircle, Calendar, Users, Clock, AlertTriangle, Lock, CheckCircle, XCircle, Activity, BarChart3, ShieldCheck, Power, X, MessageCircle, Bell } from 'lucide-react';
+import { Loader, AlertCircle, Calendar, Users, Clock, AlertTriangle, Lock, CheckCircle, XCircle, Activity, BarChart3, ShieldCheck, Power, X, MessageCircle, Bell, Stethoscope, Download } from 'lucide-react';
 import ChangePasswordModal from '@/components/ChangePasswordModal';
 import toast from 'react-hot-toast';
 import dynamic from 'next/dynamic';
@@ -32,6 +32,7 @@ export default function DoctorDashboard() {
   const [showCriticalAlertModal, setShowCriticalAlertModal] = useState(false);
   const [criticalAlertCount, setCriticalAlertCount] = useState(0);
   const [newCriticalAlert, setNewCriticalAlert] = useState<any>(null);
+  const [downloadingPatientId, setDownloadingPatientId] = useState<string | null>(null);
 
   // Status Change Request State
   const [showStatusModal, setShowStatusModal] = useState(false);
@@ -175,6 +176,30 @@ export default function DoctorDashboard() {
       toast.error(err.message || 'Failed to cancel');
     } finally {
       setActionLoading(null);
+    }
+  };
+
+  const downloadMedicalRecord = async (patientId?: string, patientName?: string) => {
+    if (!patientId) {
+      toast.error('Patient ID missing for this alert');
+      return;
+    }
+    try {
+      setDownloadingPatientId(patientId);
+      const blob = await apiClient.downloadMedicalRecord(patientId);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const safeName = (patientName || patientId).replace(/\s+/g, '_');
+      link.download = `medical_record_${safeName}.pdf`;
+      link.click();
+      window.URL.revokeObjectURL(url);
+      toast.success('Medical record downloaded');
+    } catch (err: any) {
+      console.error(err);
+      toast.error('Failed to download medical record');
+    } finally {
+      setDownloadingPatientId(null);
     }
   };
 
@@ -468,15 +493,34 @@ export default function DoctorDashboard() {
                               <span className="text-[10px] font-medium text-slate-400">{new Date(alert.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                             </div>
                           </div>
-                          {alert.patientId && (
-                            <Link
-                              href={`/doctor/chat/${alert.patientId}`}
-                              className="p-2 bg-blue-100 text-blue-600 rounded-xl hover:bg-blue-200 transition-colors flex-shrink-0"
-                              title="Chat with patient"
-                            >
-                              <MessageCircle className="w-4 h-4" />
-                            </Link>
-                          )}
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            {alert.patientId && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  downloadMedicalRecord(alert.patientId, alert.patientName);
+                                }}
+                                disabled={downloadingPatientId === alert.patientId}
+                                className="p-2 bg-white text-emerald-700 border border-emerald-200 rounded-xl hover:bg-emerald-50 transition-colors flex items-center gap-1 text-xs font-semibold disabled:opacity-60"
+                                title="Download medical record"
+                              >
+                                {downloadingPatientId === alert.patientId ? (
+                                  <Loader className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <Download className="w-4 h-4" />
+                                )}
+                              </button>
+                            )}
+                            {alert.patientId && (
+                              <Link
+                                href={`/doctor/chat/${alert.patientId}`}
+                                className="p-2 bg-blue-100 text-blue-600 rounded-xl hover:bg-blue-200 transition-colors flex-shrink-0"
+                                title="Chat with patient"
+                              >
+                                <MessageCircle className="w-4 h-4" />
+                              </Link>
+                            )}
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -694,6 +738,19 @@ export default function DoctorDashboard() {
                       )}
 
                       <div className="flex gap-3 pt-6 border-t border-slate-100">
+                        {(() => {
+                          const patientId = selectedAlert?.patientId || selectedAlert?.patient_id;
+                          return patientId ? (
+                            <button
+                              onClick={() => downloadMedicalRecord(patientId, selectedAlert?.patientName)}
+                              disabled={downloadingPatientId === patientId}
+                              className="flex-1 h-12 bg-slate-100 text-slate-700 font-black uppercase tracking-widest text-xs rounded-xl hover:bg-slate-200 transition-all flex items-center justify-center gap-2"
+                            >
+                              {downloadingPatientId === patientId ? <Loader className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                              Download record
+                            </button>
+                          ) : null;
+                        })()}
                         <button
                           onClick={() => setSelectedAlert(null)}
                           className="flex-1 h-12 bg-slate-900 text-white font-black uppercase tracking-widest text-xs rounded-xl hover:bg-black transition-all"
