@@ -216,7 +216,7 @@ export default function PatientDashboard() {
               <div className="p-2 bg-emerald-100 rounded-xl group-hover:bg-emerald-200 transition-colors">
                 <Lock className="w-4 h-4 text-emerald-600" />
               </div>
-              Security Settings
+              Change Password
             </button>
           </div>
 

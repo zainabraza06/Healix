@@ -1,6 +1,7 @@
 import { getPatientMedicalRecords, addMedicalRecordEntry, generateMedicalRecordsPDF } from '../services/medicalRecordService.js';
 import { successResponse, errorResponse } from '../utils/response.js';
 import Appointment from '../models/Appointment.js';
+import Alert from '../models/Alert.js';
 import Doctor from '../models/Doctor.js';
 import Patient from '../models/Patient.js';
 
@@ -50,10 +51,11 @@ export const downloadPatientMedicalRecordController = async (req, res, next) => 
                 hasAccess = true;
             }
         }
-        // 3. Doctor: Access ONLY if appointment exists (Scheduled/Completed)
+        // 3. Doctor: Access if appointment OR alert exists
         else if (currentUser.role === 'DOCTOR') {
             const doctor = await Doctor.findOne({ user_id: currentUser._id });
             if (doctor) {
+                // Check for existing appointment (Scheduled or Completed)
                 const appointment = await Appointment.findOne({
                     patient_id: patientId,
                     doctor_id: doctor._id,
@@ -61,6 +63,16 @@ export const downloadPatientMedicalRecordController = async (req, res, next) => 
                 });
                 if (appointment) {
                     hasAccess = true;
+                }
+                // Also check for existing alert with this doctor
+                else {
+                    const alert = await Alert.findOne({
+                        patient_id: patientId,
+                        doctor_id: doctor._id
+                    });
+                    if (alert) {
+                        hasAccess = true;
+                    }
                 }
             }
         }
