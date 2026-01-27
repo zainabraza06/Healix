@@ -676,6 +676,40 @@ export default function AdminDashboard() {
 
                 return (
                   <>
+                    {/* Resolved Alert - Instructions and Prescription */}
+                    {selectedAlert?.status === 'RESOLVED' && (selectedAlert?.instructions || selectedAlert?.prescription) && (
+                      <div className="space-y-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <CheckCircle className="w-6 h-6 text-emerald-600" />
+                          <h4 className="text-xl font-bold text-emerald-800">Alert Resolved</h4>
+                        </div>
+                        
+                        {selectedAlert?.instructions && (
+                          <div className="bg-emerald-50 p-6 rounded-2xl border-2 border-emerald-200">
+                            <div className="flex items-center gap-2 mb-3">
+                              <Stethoscope className="w-5 h-5 text-emerald-700" />
+                              <h5 className="text-sm font-bold text-emerald-900 uppercase tracking-wider">Doctor's Instructions</h5>
+                            </div>
+                            <p className="text-sm text-emerald-900 leading-relaxed whitespace-pre-wrap font-medium">
+                              {selectedAlert.instructions}
+                            </p>
+                          </div>
+                        )}
+
+                        {selectedAlert?.prescription && (
+                          <div className="bg-emerald-50 p-6 rounded-2xl border-2 border-emerald-200">
+                            <div className="flex items-center gap-2 mb-3">
+                              <Activity className="w-5 h-5 text-emerald-700" />
+                              <h5 className="text-sm font-bold text-emerald-900 uppercase tracking-wider">Prescription</h5>
+                            </div>
+                            <p className="text-sm text-emerald-900 leading-relaxed whitespace-pre-wrap font-medium">
+                              {selectedAlert.prescription}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {/* Patient Info */}
                     {(selectedAlert.patient_name || selectedAlert.patient_id) && (
                       <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
