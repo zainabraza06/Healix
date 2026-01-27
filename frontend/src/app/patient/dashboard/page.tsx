@@ -232,9 +232,15 @@ export default function PatientDashboard() {
           )}
 
           {/* Critical Vitals Alert - Compact Inline */}
-          {dashboardData?.alerts && dashboardData.alerts.filter((alert: any) => 
-            alert.category === 'CRITICAL' && !dismissedAlerts.has(alert.id)
-          ).map((alert: any) => {
+          {dashboardData?.alerts && dashboardData.alerts.filter((alert: any) => {
+            if (alert.category !== 'CRITICAL' || dismissedAlerts.has(alert.id)) return false;
+            
+            // Check if alert is within 24 hours
+            const createdTime = new Date(alert.timestamp).getTime();
+            const now = new Date().getTime();
+            const hoursOld = (now - createdTime) / (1000 * 60 * 60);
+            return hoursOld < 24;
+          }).map((alert: any) => {
             const messageLines = alert.message.split('\n').filter((line: string) => line.trim());
             const issuesLine = messageLines.find((l: string) => l.toUpperCase().includes('ISSUES:'));
             const issuesText = issuesLine ? issuesLine.split(/issues:/i)[1] : '';
@@ -471,11 +477,12 @@ export default function PatientDashboard() {
                   <div className="glass-panel p-6">
                     <div className="flex items-center justify-between mb-4">
                       <h2 className="text-xl font-bold text-slate-800">Recent Alerts</h2>
-                      {dashboardData.alerts && dashboardData.alerts.length > 5 && (
-                        <button onClick={() => router.push('/patient/alerts')} className="text-xs font-bold text-emerald-600 hover:text-emerald-700 px-3 py-1 border border-emerald-200 rounded-lg hover:bg-emerald-50 transition-all">
-                          View All
-                        </button>
-                      )}
+                      <button 
+                        onClick={() => router.push('/patient/alerts')} 
+                        className="text-xs font-bold text-emerald-600 hover:text-emerald-700 px-3 py-1 border border-emerald-200 rounded-lg hover:bg-emerald-50 transition-all"
+                      >
+                        View All
+                      </button>
                     </div>
                     {dashboardData.alerts && dashboardData.alerts.length > 0 ? (
                       <div className="space-y-2">
@@ -498,9 +505,16 @@ export default function PatientDashboard() {
                             >
                               <div className="flex justify-between items-start">
                                 <div className="flex-1">
-                                  <p className="font-medium text-slate-800 text-sm">
-                                    {alert.category === 'CRITICAL' ? '🔴' : alert.category === 'WARNING' ? '⚠️' : 'ℹ️'} {alert.message.split('\n')[0]}
-                                  </p>
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <p className="font-medium text-slate-800 text-sm">
+                                      {alert.category === 'CRITICAL' ? '🔴' : alert.category === 'WARNING' ? '⚠️' : 'ℹ️'} {alert.message.split('\n')[0]}
+                                    </p>
+                                    {alert.status === 'RESOLVED' && (
+                                      <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded text-[10px] font-bold uppercase">
+                                        ✓ Resolved
+                                      </span>
+                                    )}
+                                  </div>
                                   <p className="text-xs text-slate-500 mt-1">
                                     {new Date(alert.timestamp).toLocaleString()}
                                     {!isWithin24h && ' • Expired'}
@@ -527,26 +541,39 @@ export default function PatientDashboard() {
                   </div>
                 </div>
 
-                {/* Doctors Section */}
+                {/* Upcoming Appointments Section */}
                 <div>
                   <div className="glass-panel p-6">
                     <h2 className="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2">
-                      <Users className="w-5 h-5 text-emerald-600" />
-                      Doctors
+                      <Clock className="w-5 h-5 text-emerald-600" />
+                      Upcoming Appointments
                     </h2>
-                    {dashboardData.doctors && dashboardData.doctors.length > 0 ? (
+                    {dashboardData.upcomingAppointments && dashboardData.upcomingAppointments.length > 0 ? (
                       <div className="space-y-3">
-                        {dashboardData.doctors.slice(0, 5).map((doctor: any) => (
-                          <div key={doctor.id} className="p-3 bg-white/40 rounded-xl border border-white/50 backdrop-blur-sm">
-                            <p className="font-medium text-slate-800">
-                              Dr. {doctor.firstName} {doctor.lastName}
-                            </p>
-                            <p className="text-xs text-slate-500">{doctor.specialization}</p>
+                        {dashboardData.upcomingAppointments.slice(0, 5).map((appointment: any) => (
+                          <div key={appointment.id} className="p-3 bg-white/40 rounded-xl border border-white/50 backdrop-blur-sm hover:bg-white/60 transition">
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1">
+                                <p className="font-medium text-slate-800 text-sm">
+                                  {appointment.doctorName}
+                                </p>
+                                <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
+                                  <Clock className="w-3 h-3" />
+                                  {new Date(appointment.scheduledTime).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                                </p>
+                              </div>
+                              <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-lg text-[10px] font-bold uppercase tracking-wider">
+                                {appointment.type}
+                              </span>
+                            </div>
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <p className="text-slate-500 text-center py-4">No doctors assigned</p>
+                      <div className="text-center py-8 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                        <Clock className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                        <p className="text-slate-400 text-sm font-medium">No upcoming appointments</p>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -643,6 +670,40 @@ export default function PatientDashboard() {
                               ? `Resolved: ${new Date(alert.resolved_at).toLocaleDateString()}`
                               : 'Status: In Assessment'}
                           </div>
+                        </div>
+                      )}
+
+                      {/* Doctor's Resolution - Instructions and Prescription */}
+                      {alert.status === 'RESOLVED' && (alert.instructions || alert.prescription) && (
+                        <div className="space-y-4">
+                          <div className="flex items-center gap-2 mb-2">
+                            <CheckCircle className="w-6 h-6 text-emerald-600" />
+                            <h4 className="text-xl font-bold text-emerald-800">Alert Resolved</h4>
+                          </div>
+                          
+                          {alert.instructions && (
+                            <div className="bg-emerald-50 p-6 rounded-2xl border-2 border-emerald-200">
+                              <div className="flex items-center gap-2 mb-3">
+                                <Stethoscope className="w-5 h-5 text-emerald-700" />
+                                <h5 className="text-sm font-bold text-emerald-900 uppercase tracking-wider">Doctor's Instructions</h5>
+                              </div>
+                              <p className="text-sm text-emerald-900 leading-relaxed whitespace-pre-wrap font-medium">
+                                {alert.instructions}
+                              </p>
+                            </div>
+                          )}
+
+                          {alert.prescription && (
+                            <div className="bg-blue-50 p-6 rounded-2xl border-2 border-blue-200">
+                              <div className="flex items-center gap-2 mb-3">
+                                <Activity className="w-5 h-5 text-blue-700" />
+                                <h5 className="text-sm font-bold text-blue-900 uppercase tracking-wider">Prescription</h5>
+                              </div>
+                              <p className="text-sm text-blue-900 leading-relaxed whitespace-pre-wrap font-medium">
+                                {alert.prescription}
+                              </p>
+                            </div>
+                          )}
                         </div>
                       )}
 

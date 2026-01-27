@@ -295,8 +295,21 @@ class ApiClient {
     return response.data;
   }
 
-  async getDoctorAlerts(): Promise<ApiResponse<any>> {
-    const response = await this.client.get('/doctor/alerts');
+  async getDoctorAlerts(page?: number, size?: number, status?: string): Promise<ApiResponse<any>> {
+    const params = new URLSearchParams();
+    if (page !== undefined) params.append('page', page.toString());
+    if (size !== undefined) params.append('size', size.toString());
+    if (status) params.append('status', status);
+    
+    const response = await this.client.get(`/doctor/alerts?${params.toString()}`);
+    return response.data;
+  }
+
+  async resolveAlert(alertId: string, instructions: string, prescription?: string): Promise<ApiResponse<any>> {
+    const response = await this.client.post(`/doctor/alerts/${alertId}/resolve`, {
+      instructions,
+      prescription
+    });
     return response.data;
   }
 

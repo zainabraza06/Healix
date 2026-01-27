@@ -4,12 +4,13 @@ import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/lib/authStore';
 import { apiClient } from '@/lib/apiClient';
 import ProtectedLayout from '@/components/ProtectedLayout';
-import { Loader, AlertCircle, Calendar, Users, Clock, AlertTriangle, Lock, CheckCircle, XCircle, Activity, BarChart3, ShieldCheck, Power, X, MessageCircle } from 'lucide-react';
+import { Loader, AlertCircle, Calendar, Users, Clock, AlertTriangle, Lock, CheckCircle, XCircle, Activity, BarChart3, ShieldCheck, Power, X, MessageCircle, Bell } from 'lucide-react';
 import ChangePasswordModal from '@/components/ChangePasswordModal';
 import toast from 'react-hot-toast';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
+import { connectSocket, joinRooms, onCriticalVitals, offCriticalVitals } from '@/lib/socket';
 
 // Import chart wrapper components
 import { PieChartWrapper, BarChartWrapper } from '@/components/charts/ChartWrappers';
@@ -28,6 +29,9 @@ export default function DoctorDashboard() {
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [selectedAlert, setSelectedAlert] = useState<any>(null);
+  const [showCriticalAlertModal, setShowCriticalAlertModal] = useState(false);
+  const [criticalAlertCount, setCriticalAlertCount] = useState(0);
+  const [newCriticalAlert, setNewCriticalAlert] = useState<any>(null);
 
   // Status Change Request State
   const [showStatusModal, setShowStatusModal] = useState(false);
@@ -76,6 +80,73 @@ export default function DoctorDashboard() {
   useEffect(() => {
     fetchDashboard();
   }, []);
+
+  // Socket connection and critical alerts notification
+  useEffect(() => {
+    if (user && dashboardData?.doctor?._id) {
+      const socket = connectSocket(localStorage.getItem('token') || undefined);
+      joinRooms({ role: 'DOCTOR', doctorId: dashboardData.doctor._id, userId: user.id });
+
+      // Check for critical alerts within 24 hours on mount
+      const checkCriticalAlerts = () => {
+        if (dashboardData.alerts && dashboardData.alerts.length > 0) {
+          const now = new Date().getTime();
+          const criticalAlertsWithin24h = dashboardData.alerts.filter((alert: any) => {
+            const createdTime = new Date(alert.timestamp).getTime();
+            const hoursOld = (now - createdTime) / (1000 * 60 * 60);
+            return alert.severity === 'CRITICAL' && hoursOld < 24;
+          });
+
+          if (criticalAlertsWithin24h.length > 0) {
+            setCriticalAlertCount(criticalAlertsWithin24h.length);
+            setShowCriticalAlertModal(true);
+          }
+        }
+      };
+
+      checkCriticalAlerts();
+
+      // Listen for real-time critical vitals alerts
+      const handleCriticalAlert = (data: any) => {
+        console.log('Critical alert received:', data);
+        setNewCriticalAlert(data);
+        fetchDashboard(); // Refresh dashboard to show new alert
+        
+        // Show toast notification
+        toast.custom((t) => (
+          <div 
+            onClick={() => {
+              toast.dismiss(t.id);
+              setSelectedAlert(data);
+            }}
+            className="glass-card p-4 border-2 border-red-500 shadow-2xl cursor-pointer hover:scale-105 transition-transform max-w-md"
+          >
+            <div className="flex items-start gap-3">
+              <div className="p-2 bg-red-100 rounded-xl">
+                <AlertTriangle className="w-5 h-5 text-red-600 animate-pulse" />
+              </div>
+              <div className="flex-1">
+                <p className="font-black text-red-900 text-sm uppercase tracking-wide">🚨 Critical Alert</p>
+                <p className="text-slate-700 text-sm mt-1 font-bold">
+                  Patient: {data.patientName || 'Unknown'}
+                </p>
+                <p className="text-slate-500 text-xs mt-1">
+                  {data.message?.split('\n')[0] || 'Critical vitals detected'}
+                </p>
+                <p className="text-emerald-600 text-xs mt-2 font-bold">Click to view details →</p>
+              </div>
+            </div>
+          </div>
+        ), { duration: 10000 });
+      };
+
+      onCriticalVitals(handleCriticalAlert);
+
+      return () => {
+        offCriticalVitals(handleCriticalAlert);
+      };
+    }
+  }, [user, dashboardData?.doctor?._id, dashboardData?.alerts]);
 
   const handleConfirmAppointment = async (id: string) => {
     try {
@@ -374,7 +445,7 @@ export default function DoctorDashboard() {
               </div>
 
               {/* Critical Alerts */}
-              <div className="glass-card p-6 border-white/40">
+              <div className="glass-card p-6 border-white/40" data-alerts-section>
                 <div className="flex items-center justify-between mb-6">
                   <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                     <AlertTriangle className="w-5 h-5 text-red-600" />
@@ -624,6 +695,77 @@ export default function DoctorDashboard() {
                     </>
                   );
                 })()}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Critical Alerts Notification Modal (on login) */}
+      <AnimatePresence>
+        {showCriticalAlertModal && criticalAlertCount > 0 && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+            onClick={() => setShowCriticalAlertModal(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-md"
+            >
+              <div className="p-8">
+                <div className="flex items-center justify-center mb-6">
+                  <div className="relative">
+                    <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center animate-pulse">
+                      <Bell className="w-10 h-10 text-red-600" />
+                    </div>
+                    <div className="absolute -top-1 -right-1 w-8 h-8 bg-red-600 text-white rounded-full flex items-center justify-center text-sm font-black">
+                      {criticalAlertCount}
+                    </div>
+                  </div>
+                </div>
+
+                <h3 className="text-2xl font-black text-slate-800 text-center mb-2">
+                  Critical Alerts!
+                </h3>
+                <p className="text-slate-600 text-center mb-6">
+                  You have <span className="font-black text-red-600">{criticalAlertCount}</span> critical patient {criticalAlertCount === 1 ? 'alert' : 'alerts'} requiring immediate attention
+                </p>
+
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6">
+                  <p className="text-xs text-amber-800 font-bold flex items-center gap-2">
+                    <Clock className="w-4 h-4" />
+                    Recent alerts (within 24 hours)
+                  </p>
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowCriticalAlertModal(false)}
+                    className="flex-1 py-3 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition"
+                  >
+                    Dismiss
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowCriticalAlertModal(false);
+                      // Scroll to alerts section
+                      const alertsSection = document.querySelector('[data-alerts-section]');
+                      if (alertsSection) {
+                        alertsSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      }
+                    }}
+                    className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition shadow-lg flex items-center justify-center gap-2"
+                  >
+                    <AlertTriangle className="w-4 h-4" />
+                    View Alerts
+                  </button>
+                </div>
               </div>
             </motion.div>
           </motion.div>

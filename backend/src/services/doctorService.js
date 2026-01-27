@@ -343,3 +343,96 @@ export const getDoctorPatients = async (doctorId) => {
     throw new Error(`Failed to fetch doctor patients: ${error.message}`);
   }
 };
+
+/**
+ * Get all alerts assigned to this doctor with pagination
+ */
+export const getDoctorAlerts = async (doctorId, page = 0, size = 10, status) => {
+  try {
+    const Alert = (await import('../models/Alert.js')).default;
+    const query = { doctor_id: doctorId };
+    
+    if (status) {
+      query.status = status;
+    }
+
+    const alerts = await Alert.find(query)
+      .populate({
+        path: 'patient_id',
+        select: 'user_id',
+        populate: {
+          path: 'user_id',
+          select: 'full_name email'
+        }
+      })
+      .sort({ created_at: -1 })
+      .skip(page * size)
+      .limit(size)
+      .lean();
+
+    const totalElements = await Alert.countDocuments(query);
+    const totalPages = Math.ceil(totalElements / size);
+
+    return {
+      content: alerts.map(alert => ({
+        id: alert._id,
+        patientId: alert.patient_id?._id,
+        patientName: alert.patient_id?.user_id?.full_name || 'Unknown Patient',
+        patientEmail: alert.patient_id?.user_id?.email,
+        title: alert.title,
+        message: alert.message,
+        alertType: alert.alert_type,
+        severity: alert.severity,
+        status: alert.status,
+        instructions: alert.instructions,
+        prescription: alert.prescription,
+        createdAt: alert.created_at,
+        resolvedAt: alert.resolved_at,
+        timestamp: alert.created_at
+      })),
+      pageNumber: page,
+      pageSize: size,
+      totalElements,
+      totalPages,
+      hasNext: page < totalPages - 1,
+      hasPrevious: page > 0
+    };
+  } catch (error) {
+    throw new Error(`Failed to fetch doctor alerts: ${error.message}`);
+  }
+};
+
+/**
+ * Resolve an alert with instructions and optional prescription
+ */
+export const resolveAlert = async (alertId, doctorId, instructions, prescription) => {
+  try {
+    const Alert = (await import('../models/Alert.js')).default;
+    
+    const alert = await Alert.findById(alertId);
+    if (!alert) {
+      const err = new Error('Alert not found');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    // Verify this alert belongs to this doctor
+    if (alert.doctor_id.toString() !== doctorId.toString()) {
+      const err = new Error('Unauthorized to resolve this alert');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    // Update alert with resolution
+    alert.status = 'RESOLVED';
+    alert.instructions = instructions;
+    alert.prescription = prescription || null;
+    alert.resolved_at = new Date();
+    
+    await alert.save();
+
+    return await Alert.findById(alertId).populate('patient_id', 'full_name email').lean();
+  } catch (error) {
+    throw error;
+  }
+};

@@ -231,6 +231,11 @@ export default function AllAlertsPage() {
                           <span className={`px-2 py-0.5 border rounded text-[10px] font-black uppercase tracking-wider ${getSeverityColor(alert.severity || alert.category)}`}>
                             {(alert.severity || alert.category)?.toUpperCase()} SEVERITY
                           </span>
+                          {alert.status === 'RESOLVED' && (
+                            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded text-[10px] font-black uppercase tracking-wider">
+                              ✓ RESOLVED
+                            </span>
+                          )}
                         </div>
                         <h3 className="text-lg font-bold text-slate-800 mb-3">{alert.message?.split('\n')[0] || 'Health Alert'}</h3>
 
@@ -250,7 +255,7 @@ export default function AllAlertsPage() {
                           <span>{new Date(alert.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                         </div>
 
-                        <p className="text-xs text-slate-400 italic">Click to view full details</p>
+                        <p className="text-xs text-slate-400 italic">Click to view full details{alert.status === 'RESOLVED' && (alert.instructions || alert.prescription) ? ' including doctor\'s instructions' : ''}</p>
                       </div>
                     );
                   })}
@@ -367,6 +372,40 @@ export default function AllAlertsPage() {
                                 ? `Resolved: ${new Date(alert.resolved_at).toLocaleDateString()}`
                                 : 'Status: In Assessment'}
                             </div>
+                          </div>
+                        )}
+
+                        {/* Doctor's Resolution - Instructions and Prescription */}
+                        {alert.status === 'RESOLVED' && (alert.instructions || alert.prescription) && (
+                          <div className="space-y-4">
+                            <div className="flex items-center gap-2 mb-2">
+                              <CheckCircle className="w-6 h-6 text-emerald-600" />
+                              <h4 className="text-xl font-bold text-emerald-800">Alert Resolved</h4>
+                            </div>
+                            
+                            {alert.instructions && (
+                              <div className="bg-emerald-50 p-6 rounded-2xl border-2 border-emerald-200">
+                                <div className="flex items-center gap-2 mb-3">
+                                  <Stethoscope className="w-5 h-5 text-emerald-700" />
+                                  <h5 className="text-sm font-bold text-emerald-900 uppercase tracking-wider">Doctor's Instructions</h5>
+                                </div>
+                                <p className="text-sm text-emerald-900 leading-relaxed whitespace-pre-wrap font-medium">
+                                  {alert.instructions}
+                                </p>
+                              </div>
+                            )}
+
+                            {alert.prescription && (
+                              <div className="bg-blue-50 p-6 rounded-2xl border-2 border-blue-200">
+                                <div className="flex items-center gap-2 mb-3">
+                                  <Activity className="w-5 h-5 text-blue-700" />
+                                  <h5 className="text-sm font-bold text-blue-900 uppercase tracking-wider">Prescription</h5>
+                                </div>
+                                <p className="text-sm text-blue-900 leading-relaxed whitespace-pre-wrap font-medium">
+                                  {alert.prescription}
+                                </p>
+                              </div>
+                            )}
                           </div>
                         )}
 
