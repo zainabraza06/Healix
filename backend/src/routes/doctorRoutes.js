@@ -1,5 +1,5 @@
 import express from 'express';
-import { getDoctorDashboardController, requestStatusChangeController } from '../controllers/doctorController.js';
+import { getDoctorDashboardController, requestStatusChangeController, getDoctorPatientsController } from '../controllers/doctorController.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -11,5 +11,6 @@ router.use(authorize('DOCTOR'));
 // Dashboard statistics endpoint
 router.get('/dashboard', getDoctorDashboardController);
 router.post('/request-status-change', requestStatusChangeController);
+router.get('/patients', getDoctorPatientsController);
 
 export default router;

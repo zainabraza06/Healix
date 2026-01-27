@@ -111,12 +111,39 @@ export const getAppointmentStats = async () => {
  */
 export const getRecentAlerts = async (limit = 10) => {
   try {
-    const alerts = await Alert.find()
+    const rawAlerts = await Alert.find()
       .sort({ created_at: -1 })
       .limit(limit)
-      .populate('patient_id', 'name')
-      .populate('doctor_id', 'name')
+      .populate({
+        path: 'patient_id',
+        populate: { path: 'user_id', select: 'full_name name email' },
+      })
+      .populate({
+        path: 'doctor_id',
+        populate: { path: 'user_id', select: 'full_name name email' },
+      })
       .lean();
+
+    // Normalize names for frontend display
+    const alerts = rawAlerts.map((alert) => {
+      const doctorName =
+        alert?.doctor_id?.user_id?.full_name ||
+        alert?.doctor_id?.user_id?.name ||
+        alert?.doctor_name ||
+        null;
+      const patientName =
+        alert?.patient_id?.user_id?.full_name ||
+        alert?.patient_id?.user_id?.name ||
+        null;
+
+      return {
+        ...alert,
+        doctor_name: doctorName,
+        patient_name: patientName,
+        doctor_id: alert?.doctor_id?._id || alert?.doctor_id,
+        patient_id: alert?.patient_id?._id || alert?.patient_id,
+      };
+    });
 
     return alerts;
   } catch (error) {
@@ -588,11 +615,11 @@ export const getPaginatedAppointments = async (page = 0, size = 10) => {
     const appointments = await Appointment.find()
       .populate({
         path: 'patient_id',
-        populate: { path: 'user_id', select: 'name email' },
+        populate: { path: 'user_id', select: 'full_name name email' },
       })
       .populate({
         path: 'doctor_id',
-        populate: { path: 'user_id', select: 'name email' },
+        populate: { path: 'user_id', select: 'full_name name email' },
       })
       .sort({ appointment_date: -1, appointment_time: -1 })
       .skip(page * size)
@@ -619,23 +646,43 @@ export const getPaginatedAppointments = async (page = 0, size = 10) => {
 /**
  * Get paginated alerts
  */
-export const getPaginatedAlerts = async (page = 0, size = 10) => {
+export const getPaginatedAlerts = async (page = 0, size = 10, status) => {
   try {
-    const alerts = await Alert.find()
+    const query = status ? { status } : {};
+
+    const rawAlerts = await Alert.find(query)
       .populate({
         path: 'patient_id',
-        populate: { path: 'user_id', select: 'name email' },
+        populate: { path: 'user_id', select: 'full_name name email' },
       })
       .populate({
         path: 'doctor_id',
-        populate: { path: 'user_id', select: 'name email' },
+        populate: { path: 'user_id', select: 'full_name name email' },
       })
       .sort({ created_at: -1 })
       .skip(page * size)
       .limit(size)
       .lean();
 
-    const totalElements = await Alert.countDocuments();
+    // Normalize doctor and patient names for frontend display
+    const alerts = rawAlerts.map((alert) => {
+      const doctorName =
+        alert?.doctor_id?.user_id?.full_name ||
+        alert?.doctor_id?.user_id?.name ||
+        alert?.doctor_name ||
+        null;
+      const patientName =
+        alert?.patient_id?.user_id?.full_name ||
+        alert?.patient_id?.user_id?.name ||
+        null;
+      return {
+        ...alert,
+        doctor_name: doctorName,
+        patient_name: patientName,
+      };
+    });
+
+    const totalElements = await Alert.countDocuments(query);
     const totalPages = Math.ceil(totalElements / size);
 
     return {
@@ -921,4 +968,63 @@ export const changePatientStatus = async (patientId, status, reason) => {
   } catch (error) {
     throw new Error(`Failed to change patient status: ${error.message}`);
   }
+};
+
+/**
+ * Get all alerts for download
+ */
+export const getAllAlertsForDownload = async () => {
+  try {
+    const alerts = await Alert.find()
+      .populate({
+        path: 'patient_id',
+        populate: { path: 'user_id', select: 'full_name name email' },
+      })
+      .populate({
+        path: 'doctor_id',
+        populate: { path: 'user_id', select: 'full_name name email' },
+      })
+      .sort({ created_at: -1 })
+      .lean();
+
+    return alerts.map(a => ({
+      id: a._id?.toString?.(),
+      title: a.title || '',
+      message: a.message || '',
+      severity: a.severity || 'UNKNOWN',
+      status: a.status || 'UNKNOWN',
+      patientName: a.patient_id?.user_id?.full_name || a.patient_id?.user_id?.name || 'N/A',
+      doctorName: a.doctor_id?.user_id?.full_name || a.doctor_id?.user_id?.name || 'N/A',
+      createdAt: a.created_at,
+      resolvedAt: a.resolved_at || 'N/A',
+    }));
+  } catch (error) {
+    throw new Error(`Failed to fetch alerts for download: ${error.message}`);
+  }
+};
+
+/**
+ * Format alerts for CSV download
+ */
+export const formatAlertsForCSV = async () => {
+  const data = await getAllAlertsForDownload();
+  const headers = ['id', 'title', 'severity', 'status', 'patientName', 'doctorName', 'createdAt', 'resolvedAt'];
+  const rows = data.map((a) => [
+    a.id,
+    a.title,
+    a.severity,
+    a.status,
+    a.patientName,
+    a.doctorName,
+    a.createdAt ? new Date(a.createdAt).toISOString() : '',
+    a.resolvedAt !== 'N/A' ? new Date(a.resolvedAt).toISOString() : '',
+  ]);
+  const csv = [headers.join(','), ...rows.map((r) => r.map((v) => {
+    const s = v == null ? '' : String(v);
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  }).join(','))].join('\n');
+  return csv;
 };

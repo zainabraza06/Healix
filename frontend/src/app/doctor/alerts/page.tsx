@@ -146,7 +146,59 @@ export default function DoctorAlertsPage() {
                               )}
                             </div>
                             <p className="mb-2">{alert.title}</p>
-                            <p className="mb-2 text-sm opacity-75">{alert.message}</p>
+                            
+                            {/* Structured Alert Message */}
+                            {(() => {
+                              const lines = (alert.message || '').split('\n').filter((l: string) => l.trim());
+                              let issuesText = '';
+                              let recsText = '';
+                              let snapshotText = '';
+                              
+                              for (const line of lines) {
+                                if (line.toUpperCase().includes('ISSUES:')) {
+                                  issuesText = line.split(/issues:/i)[1] || '';
+                                } else if (line.toUpperCase().includes('RECOMMENDATIONS:')) {
+                                  recsText = line.split(/recommendations:/i)[1] || '';
+                                } else if (line.toUpperCase().includes('SNAPSHOT:')) {
+                                  snapshotText = line.split(/snapshot:/i)[1] || '';
+                                }
+                              }
+                              
+                              const issues = issuesText.split(';').map((i: string) => i.trim()).filter((i: string) => i.length > 0);
+                              const recommendations = recsText.split('|').map((r: string) => r.trim()).filter((r: string) => r.length > 0);
+
+                              if (issues.length === 0 && recommendations.length === 0 && !snapshotText) {
+                                return <p className="mb-2 text-sm opacity-75">{alert.message}</p>;
+                              }
+
+                              return (
+                                <div className="space-y-3 my-3">
+                                  {issues.length > 0 && (
+                                    <div className="bg-white/40 p-3 rounded-lg border border-black/5">
+                                      <p className="text-xs font-black uppercase tracking-wider mb-1 opacity-70">Detected Issues</p>
+                                      <ul className="text-sm">
+                                        {issues.map((issue, i) => <li key={i}>• {issue}</li>)}
+                                      </ul>
+                                    </div>
+                                  )}
+                                  {recommendations.length > 0 && (
+                                    <div className="bg-white/40 p-3 rounded-lg border border-black/5">
+                                      <p className="text-xs font-black uppercase tracking-wider mb-1 opacity-70">AI Recommendations</p>
+                                      <ul className="text-sm">
+                                        {recommendations.map((rec, r) => <li key={r}>✓ {rec}</li>)}
+                                      </ul>
+                                    </div>
+                                  )}
+                                  {snapshotText && (
+                                    <div className="bg-white/40 p-3 rounded-lg border border-black/5">
+                                      <p className="text-xs font-black uppercase tracking-wider mb-1 opacity-70">Vitals Snapshot</p>
+                                      <p className="text-xs font-mono">{snapshotText}</p>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
+
                             <div className="flex items-center gap-2 text-sm opacity-75">
                               <Clock size={16} />
                               {new Date(alert.createdAt).toLocaleString()}

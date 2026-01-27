@@ -21,6 +21,7 @@ import {
   manageDoctorStatusController,
   managePatientStatusController,
   downloadPatientsController,
+  downloadAlertsController,
 } from '../controllers/adminController.js';
 import {
   getMedicalRecordsController,
@@ -63,6 +64,7 @@ router.get('/doctors', getPaginatedDoctorsController);
 router.get('/doctors/download', downloadDoctorsController);
 router.get('/appointments', getPaginatedAppointmentsController);
 router.get('/alerts', getPaginatedAlertsController);
+router.get('/alerts/export', downloadAlertsController);
 router.get('/logs', getLogsController);
 router.get('/logs/download', downloadLogsController);
 

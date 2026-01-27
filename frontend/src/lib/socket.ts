@@ -49,3 +49,56 @@ export const offCriticalVitals = (handler?: (data: any) => void) => {
   if (handler) socket.off('criticalVitals', handler);
   else socket.off('criticalVitals');
 };
+
+export const emitChatMessage = (payload: { senderId: string; recipientId: string; message: any }) => {
+  if (!socket) return;
+  socket.emit('chat:send', payload);
+};
+
+export const emitTyping = (payload: { senderId: string; recipientId: string; isTyping: boolean }) => {
+  if (!socket) return;
+  socket.emit('chat:typing', payload);
+};
+
+export const onTyping = (handler: (data: any) => void) => {
+  if (!socket) return;
+  socket.on('chat:typing', handler);
+};
+
+export const offTyping = (handler?: (data: any) => void) => {
+  if (!socket) return;
+  if (handler) socket.off('chat:typing', handler);
+  else socket.off('chat:typing');
+};
+
+export const emitMessageStatus = (payload: { messageId: string; status: 'delivered' | 'read' }) => {
+  if (!socket) return;
+  socket.emit('chat:status', payload);
+};
+
+export const onMessageStatus = (handler: (data: any) => void) => {
+  if (!socket) return;
+  socket.on('chat:status', handler);
+};
+
+export const offMessageStatus = (handler?: (data: any) => void) => {
+  if (!socket) return;
+  if (handler) socket.off('chat:status', handler);
+  else socket.off('chat:status');
+};
+
+export const checkUserStatus = (userId: string) => {
+  if (!socket) return;
+  socket.emit('chat:checkStatus', { userId });
+};
+
+export const onStatusResponse = (handler: (data: { userId: string; isOnline: boolean }) => void) => {
+  if (!socket) return;
+  socket.on('chat:statusResponse', handler);
+};
+
+export const offStatusResponse = (handler?: (data: any) => void) => {
+  if (!socket) return;
+  if (handler) socket.off('chat:statusResponse', handler);
+  else socket.off('chat:statusResponse');
+};

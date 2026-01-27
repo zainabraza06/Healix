@@ -213,12 +213,12 @@ export const getDoctorDashboard = async (doctorId) => {
           status: { $ne: 'CANCELLED' }
         });
       }),
-      // Unacknowledged alerts for patients associated with this doctor
+      // Active alerts for patients associated with this doctor
       import('../models/Alert.js').then(async (mod) => {
         const Alert = mod.default;
         return await Alert.countDocuments({
           doctor_id: doctorId,
-          acknowledged: false
+          status: 'ACTIVE'
         });
       })
     ]);
@@ -253,7 +253,7 @@ export const getDoctorDashboard = async (doctorId) => {
       const Alert = mod.default;
       return await Alert.find({
         doctor_id: doctorId,
-        acknowledged: false
+        status: 'ACTIVE'
       })
         .sort({ created_at: -1 })
         .limit(5)
@@ -285,13 +285,61 @@ export const getDoctorDashboard = async (doctorId) => {
       })),
       alerts: alerts.map(alert => ({
         id: alert._id,
+        patientId: alert.patient_id?._id,
+        patientName: alert.patient_id?.full_name,
+        title: alert.title,
         message: alert.message,
-        category: alert.category,
-        timestamp: alert.created_at,
-        patientName: alert.patient_id?.full_name
+        alertType: alert.alert_type,
+        severity: alert.severity,
+        status: alert.status,
+        timestamp: alert.created_at
       }))
     };
   } catch (error) {
     throw new Error(`Failed to fetch doctor dashboard: ${error.message}`);
+  }
+};
+
+/**
+ * Get all unique patients this doctor can chat with
+ * Returns patients who have active alerts or confirmed appointments
+ */
+export const getDoctorPatients = async (doctorId) => {
+  try {
+    // Get unique patient IDs from alerts
+    const alertPatients = await import('../models/Alert.js').then(async (mod) => {
+      const Alert = mod.default;
+      return await Alert.distinct('patient_id', {
+        doctor_id: doctorId,
+        status: 'ACTIVE'
+      });
+    });
+
+    // Get unique patient IDs from confirmed appointments
+    const appointmentPatients = await import('../models/Appointment.js').then(async (mod) => {
+      const Appointment = mod.default;
+      return await Appointment.distinct('patient_id', {
+        doctor_id: doctorId,
+        status: 'CONFIRMED'
+      });
+    });
+
+    // Combine and deduplicate patient IDs
+    const uniquePatientIds = [...new Set([...alertPatients, ...appointmentPatients])];
+
+    // Fetch patient details
+    const Patient = (await import('../models/Patient.js')).default;
+    const patients = await Patient.find({ _id: { $in: uniquePatientIds } })
+      .populate('user_id', 'full_name email')
+      .lean();
+
+    return patients.map(p => ({
+      id: p._id.toString(),
+      user_id: p.user_id?._id?.toString(),
+      name: p.user_id?.full_name || 'Unknown Patient',
+      email: p.user_id?.email || ''
+    }));
+  } catch (error) {
+    throw new Error(`Failed to fetch doctor patients: ${error.message}`);
   }
 };

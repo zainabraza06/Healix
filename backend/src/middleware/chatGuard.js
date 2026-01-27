@@ -13,6 +13,9 @@ import Doctor from '../models/Doctor.js';
 export const isChatAllowed = async (patientId, doctorId) => {
   const now = new Date();
 
+  // If either id missing, deny immediately
+  if (!patientId || !doctorId) return false;
+
   // Check appointment relationship
   const appointment = await Appointment.findOne({
     patient_id: patientId,
@@ -37,7 +40,10 @@ export const isChatAllowed = async (patientId, doctorId) => {
     ],
   }).lean();
 
-  return !!alert;
+  if (alert) return true;
+
+  // Fallback: allow patient-initiated chat even without linked appointment/alert
+  return true;
 };
 
 /**

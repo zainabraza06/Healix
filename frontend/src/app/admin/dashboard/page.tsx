@@ -60,6 +60,7 @@ export default function AdminDashboard() {
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [selectedDoctorForReject, setSelectedDoctorForReject] = useState<any>(null);
   const [rejectionReason, setRejectionReason] = useState('');
+  const [selectedAlert, setSelectedAlert] = useState<any>(null);
 
   // Sample data for charts
 
@@ -465,22 +466,31 @@ export default function AdminDashboard() {
                       {dashboardData.recentAlerts.slice(0, 5).map((alert: any) => (
                         <div
                           key={alert._id}
-                          className={`p-3 rounded-lg border backdrop-blur-sm transition ${alert.severity === 'CRITICAL'
-                            ? 'bg-red-50 border-red-200'
+                          onClick={() => setSelectedAlert(alert)}
+                          className={`p-3 rounded-lg border backdrop-blur-sm transition cursor-pointer hover:shadow-md ${alert.severity === 'CRITICAL'
+                            ? 'bg-red-50 border-red-200 hover:bg-red-100'
                             : alert.severity === 'HIGH'
-                              ? 'bg-orange-50 border-orange-200'
+                              ? 'bg-orange-50 border-orange-200 hover:bg-orange-100'
                               : alert.severity === 'MEDIUM'
-                                ? 'bg-yellow-50 border-yellow-200'
-                                : 'bg-blue-50 border-blue-200'
+                                ? 'bg-yellow-50 border-yellow-200 hover:bg-yellow-100'
+                                : 'bg-blue-50 border-blue-200 hover:bg-blue-100'
                             }`}
                         >
                           <div className="flex justify-between items-start gap-2">
                             <div className="flex-1 min-w-0">
                               <p className="font-medium text-slate-800 text-sm truncate">{alert.title}</p>
-                              <p className="text-xs text-slate-600 mt-1">{alert.message}</p>
+                              <p className="text-xs text-slate-600 mt-1 font-semibold">
+                                Patient: {alert.patient_name || 'N/A'}
+                              </p>
+                              {alert.doctor_name && (
+                                <p className="text-xs text-emerald-600 font-semibold">
+                                  Doctor: Dr. {alert.doctor_name}
+                                </p>
+                              )}
                               <p className="text-xs text-slate-500 mt-1">
                                 {formatDate(alert.created_at)}
                               </p>
+                              <p className="text-xs text-slate-400 mt-1">Click to view full details</p>
                             </div>
                             <span
                               className={`px-2 py-1 rounded text-xs font-semibold whitespace-nowrap ${alert.severity === 'CRITICAL'
@@ -558,7 +568,7 @@ export default function AdminDashboard() {
 
       {/* Rejection Modal */}
       {showRejectModal && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center">
               <h3 className="text-xl font-bold text-slate-800">Reject Application</h3>
@@ -592,6 +602,166 @@ export default function AdminDashboard() {
                 {actionLoading === selectedDoctorForReject?._id ? <Loader className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
                 Send Reject
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Alert Details Modal */}
+      {selectedAlert && (
+        <div 
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm"
+          onClick={() => setSelectedAlert(null)}
+        >
+          <div 
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6 border-b border-slate-100 flex justify-between items-start sticky top-0 bg-white">
+              <div className="flex-1">
+                <div className="flex items-center gap-3">
+                  <h3 className="text-2xl font-bold text-slate-800">{selectedAlert.title}</h3>
+                  <span
+                    className={`px-3 py-1 rounded-full text-sm font-semibold whitespace-nowrap ${selectedAlert.severity === 'CRITICAL'
+                      ? 'bg-red-200 text-red-800'
+                      : selectedAlert.severity === 'HIGH'
+                        ? 'bg-orange-200 text-orange-800'
+                        : selectedAlert.severity === 'MEDIUM'
+                          ? 'bg-yellow-200 text-yellow-800'
+                          : 'bg-blue-200 text-blue-800'
+                      }`}
+                  >
+                    {selectedAlert.severity}
+                  </span>
+                </div>
+                <p className="text-sm text-slate-500 mt-2">{formatDate(selectedAlert.created_at)}</p>
+              </div>
+              <button
+                onClick={() => setSelectedAlert(null)}
+                className="text-slate-400 hover:text-slate-600 transition ml-4"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="p-6 space-y-6">
+              {(() => {
+                const lines = selectedAlert.message.split('\n').filter((l: string) => l.trim());
+                
+                // Extract Issues (line starting with "Issues:")
+                let issuesText = '';
+                let recsText = '';
+                let snapshotText = '';
+                
+                for (const line of lines) {
+                  if (line.startsWith('Issues:')) {
+                    issuesText = line.replace('Issues:', '').trim();
+                  } else if (line.startsWith('Recommendations:')) {
+                    recsText = line.replace('Recommendations:', '').trim();
+                  } else if (line.startsWith('Snapshot:')) {
+                    snapshotText = line.replace('Snapshot:', '').trim();
+                  }
+                }
+                
+                // Parse issues (separated by semicolon)
+                const issues = issuesText
+                  .split(';')
+                  .map((i: string) => i.trim())
+                  .filter((i: string) => i.length > 0);
+                
+                // Parse recommendations (separated by pipe)
+                const recs = recsText
+                  .split('|')
+                  .map((r: string) => r.trim())
+                  .filter((r: string) => r.length > 0);
+
+                return (
+                  <>
+                    {/* Patient Info */}
+                    {(selectedAlert.patient_name || selectedAlert.patient_id) && (
+                      <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                        <div className="flex items-center gap-3 mb-1">
+                          <Users className="w-4 h-4 text-slate-500" />
+                          <p className="text-sm font-semibold text-slate-700">Patient</p>
+                        </div>
+                        <p className="text-sm text-slate-800 font-bold">
+                          {selectedAlert.patient_name || selectedAlert.patient_id?.user_id?.full_name || selectedAlert.patient_id?.user_id?.name || 'Unknown Patient'}
+                        </p>
+                        <p className="text-[11px] text-slate-500 font-semibold mt-1">ID: {selectedAlert.patient_id?._id || selectedAlert.patient_id?.id || 'N/A'}</p>
+                      </div>
+                    )}
+
+                    {/* Doctor Consultation Status */}
+                    {selectedAlert.doctor_id && (
+                      <div className="p-4 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl text-white shadow-lg">
+                        <div className="flex items-center gap-3 mb-2">
+                          <Stethoscope className="w-5 h-5" />
+                          <p className="text-sm font-bold">Consultation Active</p>
+                        </div>
+                        <p className="text-xs font-semibold opacity-90">
+                          Being reviewed by Dr. {selectedAlert.doctor_name}
+                        </p>
+                        {selectedAlert.doctor_id?._id && (
+                          <p className="text-[10px] text-white/80 font-semibold mt-1">ID: {selectedAlert.doctor_id._id}</p>
+                        )}
+                        <div className="mt-3 pt-3 border-t border-white/20 text-[10px] font-bold uppercase tracking-widest opacity-80">
+                          {selectedAlert.resolved_at 
+                            ? `Resolved: ${new Date(selectedAlert.resolved_at).toLocaleDateString()}`
+                            : 'Status: In Assessment'}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Critical Issues Section */}
+                    {issues.length > 0 && (
+                      <div>
+                        <h4 className="text-lg font-bold text-slate-800 mb-3 flex items-center gap-2">
+                          <AlertCircle className="w-5 h-5 text-red-600" />
+                          Critical Issues
+                        </h4>
+                        <div className="space-y-2 bg-red-50 p-4 rounded-xl border border-red-200">
+                          {issues.map((issue: string, idx: number) => (
+                            <p key={idx} className="text-sm text-red-900 leading-relaxed">
+                              • {issue}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Recommendations Section */}
+                    {recs.length > 0 && (
+                      <div>
+                        <h4 className="text-lg font-bold text-slate-800 mb-3 flex items-center gap-2">
+                          <CheckCircle className="w-5 h-5 text-emerald-600" />
+                          Recommendations
+                        </h4>
+                        <div className="space-y-2 bg-emerald-50 p-4 rounded-xl border border-emerald-200">
+                          {recs.map((rec: string, idx: number) => (
+                            <p key={idx} className="text-sm text-emerald-900 leading-relaxed">
+                              ✓ {rec}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Snapshot Section */}
+                    {snapshotText && (
+                      <div>
+                        <h4 className="text-lg font-bold text-slate-800 mb-3 flex items-center gap-2">
+                          <Activity className="w-5 h-5 text-blue-600" />
+                          Vitals Snapshot
+                        </h4>
+                        <div className="bg-blue-50 p-4 rounded-xl border border-blue-200">
+                          <p className="text-sm text-blue-900 leading-relaxed font-mono">
+                            {snapshotText}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </div>
         </div>

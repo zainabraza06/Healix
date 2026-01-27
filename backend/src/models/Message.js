@@ -6,6 +6,9 @@ const messageSchema = new mongoose.Schema(
     patient_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Patient', required: true },
     sender_role: { type: String, enum: ['DOCTOR', 'PATIENT'], required: true },
     text: { type: String, required: true },
+    status: { type: String, enum: ['SENT', 'DELIVERED', 'READ'], default: 'SENT' },
+    delivered_at: { type: Date },
+    read_at: { type: Date },
     read: { type: Boolean, default: false },
   },
   { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } }
