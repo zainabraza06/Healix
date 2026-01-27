@@ -4,16 +4,17 @@ import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/lib/authStore';
 import { apiClient } from '@/lib/apiClient';
 import ProtectedLayout from '@/components/ProtectedLayout';
-import { Loader, AlertCircle, Activity, TrendingUp, Users, Clock, Lock, Heart, Thermometer, Droplets, X, MessageSquare } from 'lucide-react';
+import { Loader, AlertCircle, Activity, TrendingUp, Users, Clock, Lock, Heart, Thermometer, Droplets, X, MessageSquare, CheckCircle, Stethoscope, ChevronRight } from 'lucide-react';
 import { connectSocket, joinRooms, onChatReceive, offChatReceive } from '@/lib/socket';
 import { useRouter } from 'next/navigation';
 import ChangePasswordModal from '@/components/ChangePasswordModal';
+import ChatModal from '@/components/ChatModal';
 import toast from 'react-hot-toast';
 import dynamic from 'next/dynamic';
 
 // Import chart wrapper components
 import { AreaChartWrapper } from '@/components/charts/ChartWrappers';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 
 // 3D Background
 const Scene = dynamic(() => import('@/components/canvas/Scene'), { ssr: false });
@@ -31,6 +32,8 @@ export default function PatientDashboard() {
   const [doctors, setDoctors] = useState<any[]>([]);
   const [selectedDoctor, setSelectedDoctor] = useState('');
   const [expandedAlert, setExpandedAlert] = useState<string | null>(null);
+  const [currentAlertForConsult, setCurrentAlertForConsult] = useState<string | null>(null);
+  const [showChatModal, setShowChatModal] = useState(false);
 
   // Interactive Vitals States
   const [timeframe, setTimeframe] = useState<7 | 30 | 90>(30);
@@ -94,9 +97,25 @@ export default function PatientDashboard() {
     try {
       const response = await apiClient.getVitalsHistory(timeframe);
       if (response.success) {
-        setDashboardData(prev => prev ? {
+        interface VitalRecord {
+          recorded_at: string;
+          heartRate?: number;
+          systolicBP?: number;
+          diastolicBP?: number;
+          oxygenLevel?: number;
+          temperature?: number;
+          respiratoryRate?: number;
+          name: string;
+        }
+
+        interface DashboardDataState {
+          vitalsHistory: VitalRecord[];
+          [key: string]: any;
+        }
+
+        setDashboardData((prev: DashboardDataState | null) => prev ? {
           ...prev,
-          vitalsHistory: response.data.map((v: any) => ({
+          vitalsHistory: response.data.map((v: VitalRecord) => ({
             ...v,
             name: new Date(v.recorded_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
           }))
@@ -130,12 +149,26 @@ export default function PatientDashboard() {
     try {
       const res = await apiClient.notifyDoctorForCriticalVitals(selectedDoctor);
       if (res.success) {
-        toast.success('Doctor notified! Opening chat...');
+        // Find the active alert
+        const activeAlert = dashboardData.alerts.find((a: any) => a.id === currentAlertForConsult);
+        
+        // Prepare and send automatic message
+        const alertMessage = activeAlert ? `🚨 CRITICAL ALERT NOTIFICATION\n\n${activeAlert.message}\n\nI need immediate medical consultation regarding these critical vitals.` : "I need medical consultation regarding my recent critical vitals.";
+        
+        await apiClient.sendPatientChatMessage(selectedDoctor, alertMessage);
+
+        toast.success('Doctor notified and message sent!');
+        
         setShowDoctorSelect(false);
-        // Redirect to chat after brief delay
+        setCurrentAlertForConsult(null);
+        
+        // Refresh dashboard to reflect consultation status
+        fetchDashboardData();
+
+        // Open chat modal after brief delay
         setTimeout(() => {
-          router.push(`/patient/chat/${selectedDoctor}`);
-        }, 500);
+          setShowChatModal(true);
+        }, 300);
       } else {
         toast.error(res.message || 'Failed to notify doctor');
       }
@@ -203,8 +236,9 @@ export default function PatientDashboard() {
             alert.category === 'CRITICAL' && !dismissedAlerts.has(alert.id)
           ).map((alert: any) => {
             const messageLines = alert.message.split('\n').filter((line: string) => line.trim());
-            const issuesLine = messageLines.find((l: string) => l.includes('Issues:'));
-            const issues = issuesLine ? issuesLine.replace('Issues: ', '').split('; ').slice(0, 2) : [];
+            const issuesLine = messageLines.find((l: string) => l.toUpperCase().includes('ISSUES:'));
+            const issuesText = issuesLine ? issuesLine.split(/issues:/i)[1] : '';
+            const issues = issuesText ? issuesText.split(';').map((i: string) => i.trim()).filter((i: string) => i.length > 0) : [];
             
             return (
             <motion.div
@@ -220,10 +254,9 @@ export default function PatientDashboard() {
                   <div>
                     <p className="font-bold text-red-900 text-sm">🔴 Critical Vitals Alert</p>
                     <p className="text-xs text-red-700 mt-1">
-                      {issues.slice(0, 1).map(i => i.trim()).join(', ')}
-                      {issues.length > 1 && ` + ${issues.length} more`}
+                      {issues.length > 0 ? issues.slice(0, 2).join(', ') + (issues.length > 2 ? '...' : '') : 'Critical vitals detected'}
                     </p>
-                    <p className="text-xs text-red-600 mt-0.5">Click to view details</p>
+                    <p className="text-xs text-red-600 mt-0.5 font-semibold">Click for immediate recommendations & doctor consultation</p>
                   </div>
                 </div>
                 <button
@@ -240,147 +273,73 @@ export default function PatientDashboard() {
             );
           })}
 
-          {/* Alert Details Modal */}
-          {expandedAlert && dashboardData?.alerts && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-              <div 
-                className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-                onClick={() => setExpandedAlert(null)}
-              ></div>
-              <motion.div
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="relative bg-white rounded-2xl p-6 w-full max-w-lg shadow-2xl"
-              >
-                {(() => {
-                  const alert = dashboardData.alerts.find((a: any) => a.id === expandedAlert);
-                  if (!alert) return null;
-                  
-                  // Check if alert is within 24 hours
-                  const createdTime = new Date(alert.timestamp).getTime();
-                  const now = new Date().getTime();
-                  const hoursOld = (now - createdTime) / (1000 * 60 * 60);
-                  const isWithin24h = hoursOld < 24;
-                  
-                  const msg = alert.message || '';
-                  const lines = msg.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-                  
-                  // Issues are on the line after title (line 1)
-                  let issues: string[] = [];
-                  if (lines.length > 1) {
-                    const issuesLine = lines[1];
-                    if (!issuesLine.includes('RECOMMENDATIONS')) {
-                      issues = issuesLine.split(',').map(i => i.trim()).filter(i => i.length > 0);
-                    }
-                  }
-                  
-                  // Recommendations start after "RECOMMENDATIONS:\" line (only show if within 24h)
-                  let recs: string[] = [];
-                  if (isWithin24h) {
-                    const recsStartIdx = lines.findIndex(l => l.includes('RECOMMENDATIONS'));
-                    if (recsStartIdx !== -1 && recsStartIdx < lines.length - 1) {
-                      recs = lines.slice(recsStartIdx + 1).filter(r => r.length > 0);
-                    }
-                  }
-                  
-                  return (
-                    <>
-                      <div className="flex items-center justify-between mb-4">
-                        <h2 className="text-lg font-black text-slate-800">Alert Details</h2>
-                        <button onClick={() => setExpandedAlert(null)} className="p-1 hover:bg-slate-100 rounded">
-                          <X className="w-5 h-5 text-slate-600" />
-                        </button>
-                      </div>
-                      
-                      <div className="space-y-4 max-h-[60vh] overflow-y-auto">
-                        {/* Issues */}
-                        {issues.length > 0 ? (
-                          <div>
-                            <p className="font-bold text-red-900 text-sm mb-2">🔴 Critical Issues:</p>
-                            <div className="space-y-2 bg-red-50 p-3 rounded-lg border border-red-200">
-                              {issues.map((issue: string, i: number) => (
-                                <p key={i} className="text-sm text-red-800 leading-relaxed">
-                                  • {issue}
-                                </p>
-                              ))}
-                            </div>
-                          </div>
-                        ) : null}
-
-                        {/* Recommendations (only within 24h) */}
-                        {isWithin24h && recs.length > 0 && (
-                          <div>
-                            <p className="font-bold text-orange-900 text-sm mb-2">💡 What to Do:</p>
-                            <div className="space-y-2 bg-orange-50 p-3 rounded-lg border border-orange-200">
-                              {recs.map((rec: string, i: number) => (
-                                <p key={i} className="text-sm text-orange-800 leading-relaxed">
-                                  • {rec}
-                                </p>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Alert Age Warning */}
-                        {!isWithin24h && (
-                          <div className="p-3 bg-slate-100 border border-slate-300 rounded-lg">
-                            <p className="text-xs text-slate-700">
-                              ℹ️ This alert is older than 24 hours. Consultation is no longer available.
-                            </p>
-                          </div>
-                        )}
-
-                        {/* Actions */}
-                        <div className="flex gap-2 pt-4 border-t">
-                          {isWithin24h && (
-                            <button
-                              onClick={() => {
-                                setExpandedAlert(null);
-                                setShowDoctorSelect(true);
-                                fetchDoctors();
-                              }}
-                              className="flex-1 px-4 py-2 bg-red-600 text-white text-sm font-bold rounded-lg hover:bg-red-700 transition-all"
-                            >
-                              Consult Doctor
-                            </button>
-                          )}
-                          <button
-                            onClick={() => setExpandedAlert(null)}
-                            className={`${isWithin24h ? 'flex-1' : 'w-full'} px-4 py-2 bg-slate-200 text-slate-800 text-sm font-bold rounded-lg hover:bg-slate-300 transition-all`}
-                          >
-                            Close
-                          </button>
-                        </div>
-                      </div>
-                    </>
-                  );
-                })()}
-              </motion.div>
-            </div>
-          )}
-
           {/* Doctor Selection Modal */}
           {showDoctorSelect && (
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
-              <div className="glass-card p-6 w-full max-w-md">
-                <h3 className="text-xl font-black text-slate-800 mb-4">Select a Doctor</h3>
-                <select
-                  value={selectedDoctor}
-                  onChange={(e) => setSelectedDoctor(e.target.value)}
-                  className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl mb-4"
-                >
-                  <option value="">Choose a doctor</option>
-                  {doctors.map((doc) => (
-                    <option key={doc.id || doc._id} value={doc.id || doc._id}>
-                      Dr. {doc.firstName || doc.user_id?.full_name} {doc.lastName || ''}
-                    </option>
-                  ))}
-                </select>
-                <div className="flex gap-3">
-                  <button onClick={() => setShowDoctorSelect(false)} className="px-5 py-2 bg-slate-200 rounded-xl">Cancel</button>
-                  <button onClick={notifyDoctor} className="px-5 py-2 bg-emerald-600 text-white rounded-xl">Notify</button>
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-[200] p-4">
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.9, y: 30 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                className="bg-white p-10 w-full max-w-md rounded-[3rem] border border-white/40 shadow-[0_32px_64px_-12px_rgba(0,0,0,0.3)] relative overflow-hidden"
+              >
+                <div className="absolute -top-24 -right-24 w-64 h-64 bg-emerald-50 rounded-full blur-3xl opacity-60" />
+                
+                <div className="relative">
+                  <div className="flex items-center gap-4 mb-8">
+                    <div className="p-4 bg-emerald-600 rounded-3xl shadow-xl shadow-emerald-200">
+                      <Stethoscope className="w-8 h-8 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-3xl font-black text-slate-800 tracking-tight leading-none">Consult</h3>
+                      <p className="text-emerald-600 font-black uppercase tracking-widest text-[10px] mt-1">Specialist Selection</p>
+                    </div>
+                  </div>
+                  
+                  <p className="text-slate-500 font-bold text-sm mb-8 leading-relaxed">
+                    Select a healthcare professional to review your clinical vitals and provide immediate guidance.
+                  </p>
+                  
+                  <div className="relative mb-10 group">
+                    <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3 ml-1">Choose your provider</label>
+                    <div className="relative">
+                      <select
+                        value={selectedDoctor}
+                        onChange={(e) => setSelectedDoctor(e.target.value)}
+                        className="w-full px-6 py-5 bg-slate-50 border-2 border-transparent rounded-[1.5rem] appearance-none focus:outline-none focus:bg-white focus:border-emerald-500 transition-all font-black text-slate-800 shadow-inner group-hover:bg-slate-100/50"
+                      >
+                        <option value="">{doctors.length === 0 ? 'Loading experts...' : 'Choose a professional...'}</option>
+                        {doctors.map((doc) => (
+                          <option key={doc.id || doc._id} value={doc.id || doc._id}>
+                            {doc.name ? `Dr. ${doc.name}` : `Dr. ${doc.firstName || ''} ${doc.lastName || ''}`} — {doc.specialization || 'General Practice'}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="absolute right-6 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                        <ChevronRight className="w-5 h-5 rotate-90" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-3">
+                    <button 
+                      onClick={notifyDoctor} 
+                      disabled={!selectedDoctor}
+                      className="w-full h-16 bg-emerald-600 text-white font-black uppercase tracking-widest text-xs rounded-2xl hover:bg-emerald-700 shadow-xl shadow-emerald-100 active:scale-[0.98] disabled:opacity-50 disabled:scale-100 transition-all flex items-center justify-center gap-3"
+                    >
+                      Initialize Consultation
+                      <MessageSquare className="w-4 h-4" />
+                    </button>
+                    <button 
+                      onClick={() => {
+                        setShowDoctorSelect(false);
+                        setSelectedDoctor('');
+                      }} 
+                      className="w-full h-16 bg-white text-slate-400 font-black uppercase tracking-widest text-xs rounded-2xl border-2 border-slate-100 hover:bg-slate-50 hover:text-slate-600 transition-all"
+                    >
+                      Maybe Later
+                    </button>
+                  </div>
                 </div>
-              </div>
+              </motion.div>
             </div>
           )}
 
@@ -520,39 +479,47 @@ export default function PatientDashboard() {
                     </div>
                     {dashboardData.alerts && dashboardData.alerts.length > 0 ? (
                       <div className="space-y-2">
-                        {dashboardData.alerts.slice(0, 5).map((alert: any) => (
-                          <div
-                            key={alert.id}
-                            onClick={() => setExpandedAlert(alert.id)}
-                            className={`p-3 rounded-lg border-l-4 backdrop-blur-sm cursor-pointer hover:shadow-md transition-all ${alert.category === 'CRITICAL'
-                              ? 'bg-red-50/50 border-red-500 hover:bg-red-100/50'
-                              : alert.category === 'WARNING'
-                                ? 'bg-amber-50/50 border-amber-500 hover:bg-amber-100/50'
-                                : 'bg-blue-50/50 border-blue-500 hover:bg-blue-100/50'
-                              }`}
-                          >
-                            <div className="flex justify-between items-start">
-                              <div className="flex-1">
-                                <p className="font-medium text-slate-800 text-sm">
-                                  {alert.category === 'CRITICAL' ? '🔴' : alert.category === 'WARNING' ? '⚠️' : 'ℹ️'} {alert.message.split('\n')[0]}
-                                </p>
-                                <p className="text-xs text-slate-500 mt-1">
-                                  {new Date(alert.timestamp).toLocaleString()}
-                                </p>
+                        {dashboardData.alerts.slice(0, 5).map((alert: any) => {
+                          const createdTime = new Date(alert.timestamp).getTime();
+                          const now = new Date().getTime();
+                          const hoursOld = (now - createdTime) / (1000 * 60 * 60);
+                          const isWithin24h = hoursOld < 24;
+                          
+                          return (
+                            <motion.div
+                              key={alert.id}
+                              onClick={() => setExpandedAlert(alert.id)}
+                              className={`p-3 rounded-lg border-l-4 backdrop-blur-sm cursor-pointer hover:shadow-md transition-all ${alert.category === 'CRITICAL'
+                                ? 'bg-red-50/50 border-red-500 hover:bg-red-100/50'
+                                : alert.category === 'WARNING'
+                                  ? 'bg-amber-50/50 border-amber-500 hover:bg-amber-100/50'
+                                  : 'bg-blue-50/50 border-blue-500 hover:bg-blue-100/50'
+                                }`}
+                            >
+                              <div className="flex justify-between items-start">
+                                <div className="flex-1">
+                                  <p className="font-medium text-slate-800 text-sm">
+                                    {alert.category === 'CRITICAL' ? '🔴' : alert.category === 'WARNING' ? '⚠️' : 'ℹ️'} {alert.message.split('\n')[0]}
+                                  </p>
+                                  <p className="text-xs text-slate-500 mt-1">
+                                    {new Date(alert.timestamp).toLocaleString()}
+                                    {!isWithin24h && ' • Expired'}
+                                  </p>
+                                </div>
+                                <span
+                                  className={`px-2 py-1 rounded text-xs font-semibold whitespace-nowrap ml-2 ${alert.category === 'CRITICAL'
+                                    ? 'bg-red-200 text-red-800'
+                                    : alert.category === 'WARNING'
+                                      ? 'bg-amber-200 text-amber-800'
+                                      : 'bg-blue-200 text-blue-800'
+                                    }`}
+                                >
+                                  {alert.category}
+                                </span>
                               </div>
-                              <span
-                                className={`px-2 py-1 rounded text-xs font-semibold whitespace-nowrap ml-2 ${alert.category === 'CRITICAL'
-                                  ? 'bg-red-200 text-red-800'
-                                  : alert.category === 'WARNING'
-                                    ? 'bg-amber-200 text-amber-800'
-                                    : 'bg-blue-200 text-blue-800'
-                                  }`}
-                              >
-                                {alert.category}
-                              </span>
-                            </div>
-                          </div>
-                        ))}
+                            </motion.div>
+                          );
+                        })}
                       </div>
                     ) : (
                       <p className="text-slate-500 text-center py-4">No alerts</p>
@@ -585,34 +552,332 @@ export default function PatientDashboard() {
                 </div>
               </div>
 
-              {/* Quick Actions */}
-              <div className="mt-8 grid md:grid-cols-4 gap-4">
-                <button onClick={() => router.push('/patient/vitals')} className="glass-card p-4 hover:bg-white/60 transition text-center group">
-                  <Activity className="w-6 h-6 text-blue-600 mx-auto mb-2 group-hover:scale-110 transition-transform" />
-                  <p className="font-semibold text-slate-800">Upload Vitals</p>
-                  <p className="text-xs text-slate-500">Share vital signs data</p>
-                </button>
-                <button className="glass-card p-4 hover:bg-white/60 transition text-center group">
-                  <Clock className="w-6 h-6 text-emerald-600 mx-auto mb-2 group-hover:scale-110 transition-transform" />
-                  <p className="font-semibold text-slate-800">Book Appointment</p>
-                  <p className="text-xs text-slate-500">Schedule with a doctor</p>
-                </button>
-                <button className="glass-card p-4 hover:bg-white/60 transition text-center group">
-                  <MessageSquare className="w-6 h-6 text-purple-600 mx-auto mb-2 group-hover:scale-110 transition-transform" />
-                  <p className="font-semibold text-slate-800">Messages</p>
-                  <p className="text-xs text-slate-500">Chat with doctors</p>
-                </button>
-                <button className="glass-card p-4 hover:bg-white/60 transition text-center group">
-                  <AlertCircle className="w-6 h-6 text-red-600 mx-auto mb-2 group-hover:scale-110 transition-transform" />
-                  <p className="font-semibold text-slate-800">Emergency Alert</p>
-                  <p className="text-xs text-slate-500">Send urgent notification</p>
-                </button>
-              </div>
+              
             </>
           )}
         </div>
       </div>
+
+      {/* Alert Detail Modal */}
+      <AnimatePresence>
+        {expandedAlert && dashboardData?.alerts && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm"
+            onClick={() => setExpandedAlert(null)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+            >
+              <div className="p-6 border-b border-slate-100 flex justify-between items-start sticky top-0 bg-white">
+                <div className="flex-1">
+                  <div className="flex items-center gap-3">
+                    <h3 className="text-2xl font-bold text-slate-800">{dashboardData.alerts.find((a: any) => a.id === expandedAlert)?.message.split('\n')[0] || 'Alert'}</h3>
+                    <span
+                      className={`px-3 py-1 rounded-full text-sm font-semibold whitespace-nowrap ${dashboardData.alerts.find((a: any) => a.id === expandedAlert)?.category === 'CRITICAL'
+                        ? 'bg-red-200 text-red-800'
+                        : dashboardData.alerts.find((a: any) => a.id === expandedAlert)?.category === 'WARNING'
+                          ? 'bg-amber-200 text-amber-800'
+                          : 'bg-blue-200 text-blue-800'
+                        }`}
+                    >
+                      {dashboardData.alerts.find((a: any) => a.id === expandedAlert)?.category}
+                    </span>
+                  </div>
+                  <p className="text-sm text-slate-500 mt-2">{new Date(dashboardData.alerts.find((a: any) => a.id === expandedAlert)?.timestamp || '').toLocaleString()}</p>
+                </div>
+                <button
+                  onClick={() => setExpandedAlert(null)}
+                  className="text-slate-400 hover:text-slate-600 transition ml-4"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              <div className="p-6 space-y-6">
+                {dashboardData.alerts.find((a: any) => a.id === expandedAlert) && (() => {
+                  const alert = dashboardData.alerts.find((a: any) => a.id === expandedAlert)!;
+                  const lines = (alert.message || '').split('\n').filter((l: string) => l.trim());
+                  
+                  let issuesText = '';
+                  let recsText = '';
+                  let snapshotText = '';
+                  
+                  for (const line of lines) {
+                    if (line.toUpperCase().includes('ISSUES:')) {
+                      issuesText = line.split(/issues:/i)[1] || '';
+                    } else if (line.toUpperCase().includes('RECOMMENDATIONS:')) {
+                      recsText = line.split(/recommendations:/i)[1] || '';
+                    } else if (line.toUpperCase().includes('SNAPSHOT:')) {
+                      snapshotText = line.split(/snapshot:/i)[1] || '';
+                    }
+                  }
+                  
+                  const issues = issuesText.split(';').map((i: string) => i.trim()).filter((i: string) => i.length > 0);
+                  const recs = recsText.split('|').map((r: string) => r.trim()).filter((r: string) => r.length > 0);
+
+                  const createdTime = new Date(alert.timestamp).getTime();
+                  const now = new Date().getTime();
+                  const hoursOld = (now - createdTime) / (1000 * 60 * 60);
+                  const isWithin24h = hoursOld < 24;
+
+                  return (
+                    <>
+                      {/* Doctor Consultation Status */}
+                      {alert.doctor_id && (
+                        <div className="p-4 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl text-white shadow-lg">
+                          <div className="flex items-center gap-3 mb-2">
+                            <Stethoscope className="w-5 h-5" />
+                            <p className="text-sm font-bold">Consultation Active</p>
+                          </div>
+                          <p className="text-xs font-semibold opacity-90">
+                            Being reviewed by Dr. {alert.doctor_name || 'a specialist'}
+                          </p>
+                          <div className="mt-3 pt-3 border-t border-white/20 text-[10px] font-bold uppercase tracking-widest opacity-80">
+                            {alert.resolved_at 
+                              ? `Resolved: ${new Date(alert.resolved_at).toLocaleDateString()}`
+                              : 'Status: In Assessment'}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Critical Issues Section */}
+                      {issues.length > 0 && (
+                        <div>
+                          <h4 className="text-lg font-bold text-slate-800 mb-3 flex items-center gap-2">
+                            <AlertCircle className="w-5 h-5 text-red-600" />
+                            Critical Issues
+                          </h4>
+                          <div className="space-y-2 bg-red-50 p-4 rounded-xl border border-red-200">
+                            {issues.map((issue: string, idx: number) => (
+                              <p key={idx} className="text-sm text-red-900 leading-relaxed">
+                                • {issue}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Recommendations Section */}
+                      {recs.length > 0 && (
+                        <div>
+                          <h4 className="text-lg font-bold text-slate-800 mb-3 flex items-center gap-2">
+                            <CheckCircle className="w-5 h-5 text-emerald-600" />
+                            Recommendations
+                          </h4>
+                          <div className="space-y-2 bg-emerald-50 p-4 rounded-xl border border-emerald-200">
+                            {recs.map((rec: string, idx: number) => (
+                              <p key={idx} className="text-sm text-emerald-900 leading-relaxed">
+                                ✓ {rec}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Snapshot Section */}
+                      {snapshotText && (
+                        <div>
+                          <h4 className="text-lg font-bold text-slate-800 mb-3 flex items-center gap-2">
+                            <Activity className="w-5 h-5 text-blue-600" />
+                            Vitals Snapshot
+                          </h4>
+                          <div className="bg-blue-50 p-4 rounded-xl border border-blue-200">
+                            <p className="text-sm text-blue-900 leading-relaxed font-mono">
+                              {snapshotText}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {!isWithin24h && (
+                        <div className="p-4 bg-slate-100 border border-slate-200 rounded-2xl flex items-center gap-4">
+                          <Clock className="w-5 h-5 text-slate-400" />
+                          <p className="text-xs text-slate-500 font-bold leading-relaxed">
+                            This alert was recorded over 24 hours ago. Symptoms may have changed since this analysis.
+                          </p>
+                        </div>
+                      )}
+
+                      <div className="flex gap-3 pt-6 border-t border-slate-100">
+                        {/* Show consult button only if no doctor assigned and within 24h */}
+                        {!alert.doctor_id && isWithin24h && alert.category === 'CRITICAL' && (
+                          <button
+                            onClick={() => {
+                              setCurrentAlertForConsult(alert.id);
+                              setShowDoctorSelect(true);
+                            }}
+                            className="flex-1 h-12 bg-slate-900 text-white font-black uppercase tracking-widest text-xs rounded-xl hover:bg-black transition-all flex items-center justify-center gap-2"
+                          >
+                            <Users className="w-4 h-4" />
+                            Consult Specialist
+                          </button>
+                        )}
+                        
+                        {/* Show continue consultation if doctor already assigned */}
+                        {alert.doctor_id && (
+                          <button
+                            onClick={() => {
+                              setExpandedAlert(null);
+                              setTimeout(() => setShowChatModal(true), 100);
+                            }}
+                            className="flex-1 h-12 bg-emerald-600 text-white font-black uppercase tracking-widest text-xs rounded-xl hover:bg-emerald-700 transition-all flex items-center justify-center gap-2"
+                          >
+                            <MessageSquare className="w-4 h-4" />
+                            Message Doctor
+                          </button>
+                        )}
+                        
+                        <button
+                          onClick={() => setExpandedAlert(null)}
+                          className="flex-1 h-12 bg-slate-100 text-slate-600 font-black uppercase tracking-widest text-xs rounded-xl hover:bg-slate-200 transition-all"
+                        >
+                          Close
+                        </button>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Doctor Selection Modal */}
+      <AnimatePresence>
+        {showDoctorSelect && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-[200] p-4"
+            onClick={() => {
+              setShowDoctorSelect(false);
+              setSelectedDoctor('');
+              setCurrentAlertForConsult(null);
+            }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 30 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 30 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white p-10 w-full max-w-md rounded-[3rem] border border-white/40 shadow-[0_32px_64px_-12px_rgba(0,0,0,0.3)] relative overflow-hidden"
+            >
+              <div className="absolute -top-24 -right-24 w-64 h-64 bg-emerald-50 rounded-full blur-3xl opacity-60" />
+              
+              <div className="relative">
+                <div className="flex items-center gap-4 mb-8">
+                  <div className="p-4 bg-emerald-600 rounded-3xl shadow-xl shadow-emerald-200">
+                    <Stethoscope className="w-8 h-8 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-3xl font-black text-slate-800 tracking-tight leading-none">Consult</h3>
+                    <p className="text-emerald-600 font-black uppercase tracking-widest text-[10px] mt-1">Specialist Selection</p>
+                  </div>
+                </div>
+                
+                <p className="text-slate-500 font-bold text-sm mb-8 leading-relaxed">
+                  Select a healthcare professional to review your clinical vitals and provide immediate guidance.
+                </p>
+                
+                {doctors.length === 0 ? (
+                  <div className="text-center py-12 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">
+                    <p className="text-slate-400 font-black uppercase tracking-widest text-[10px]">No experts available</p>
+                  </div>
+                ) : (
+                  <div className="relative mb-10 group">
+                    <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-3 ml-1">Choose your provider</label>
+                    <div className="relative">
+                      <select
+                        value={selectedDoctor || ''}
+                        onChange={(e) => setSelectedDoctor(e.target.value)}
+                        className="w-full px-6 py-5 bg-slate-50 border-2 border-transparent rounded-[1.5rem] appearance-none focus:outline-none focus:bg-white focus:border-emerald-500 transition-all font-black text-slate-800 shadow-inner group-hover:bg-slate-100/50"
+                      >
+                        <option value="" disabled>Choose a professional...</option>
+                        {doctors.map((doctor) => (
+                          <option key={doctor.id || doctor._id} value={doctor.id || doctor._id}>
+                            Dr. {doctor.name || doctor.firstName || 'Specialist'} {(!doctor.name && doctor.lastName) ? doctor.lastName : ''} — {doctor.specialization || 'General Practice'}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="absolute right-6 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                        <ChevronRight className="w-5 h-5 rotate-90" />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-3">
+                  <button 
+                    onClick={async () => {
+                      if (!selectedDoctor) {
+                        toast.error("Please select a doctor");
+                        return;
+                      }
+                      try {
+                        const res = await apiClient.notifyDoctorForCriticalVitals(selectedDoctor);
+                        if (res.success) {
+                          const currentAlert = dashboardData.alerts.find((a: any) => a.id === currentAlertForConsult);
+                          const selectedDoc = doctors.find(d => (d.id === selectedDoctor || d._id === selectedDoctor)) || { id: selectedDoctor, name: 'Consulting Doctor' };
+                          
+                          toast.success(`Specialist consultation initiated with Dr. ${selectedDoc.name}`);
+                          setShowDoctorSelect(false);
+                          setSelectedDoctor('');
+                          
+                          // Update alert data to show doctor assigned
+                          if (currentAlert) {
+                            currentAlert.doctor_id = selectedDoctor;
+                            currentAlert.doctor_name = selectedDoc.name;
+                          }
+                          
+                          // Refresh data
+                          const response = await apiClient.getPatientDashboard();
+                          if (response.success) {
+                            setDashboardData(response.data);
+                          }
+                        } else {
+                          toast.error("Failed to initialize consultation");
+                        }
+                      } catch (error) {
+                        console.error("Error initializing consultation:", error);
+                        toast.error("Error initializing consultation");
+                      }
+                    }} 
+                    disabled={!selectedDoctor}
+                    className="w-full h-16 bg-emerald-600 text-white font-black uppercase tracking-widest text-xs rounded-2xl hover:bg-emerald-700 shadow-xl shadow-emerald-100 active:scale-[0.98] disabled:opacity-50 disabled:scale-100 transition-all flex items-center justify-center gap-3"
+                  >
+                    Initialize Consultation
+                    <MessageSquare className="w-4 h-4" />
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setShowDoctorSelect(false);
+                      setSelectedDoctor('');
+                      setCurrentAlertForConsult(null);
+                    }}
+                    className="w-full h-16 bg-slate-100 text-slate-600 font-black uppercase tracking-widest text-xs rounded-2xl hover:bg-slate-200 transition-all"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <ChangePasswordModal isOpen={showPasswordModal} onClose={() => setShowPasswordModal(false)} />
+      <ChatModal 
+        isOpen={showChatModal} 
+        onClose={() => setShowChatModal(false)}
+      />
     </ProtectedLayout>
   );
 }

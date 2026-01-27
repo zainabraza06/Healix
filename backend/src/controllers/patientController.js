@@ -1,4 +1,4 @@
-import { getAllPatients, getPatientById, togglePatientStatus, getPatientDashboardData, getVitalsHistory, processVitalsCSV } from '../services/patientService.js';
+import { getAllPatients, getPatientById, togglePatientStatus, getPatientDashboardData, getVitalsHistory, processVitalsCSV, getPatientAlerts } from '../services/patientService.js';
 import { successResponse, errorResponse } from '../utils/response.js';
 import { logSuccess, logFailure } from '../utils/logger.js';
 
@@ -104,6 +104,19 @@ export const getPatientDashboardController = async (req, res, next) => {
 };
 
 /**
+ * Get all alerts for a patient (paginated, with optional status)
+ */
+export const getPatientAlertsController = async (req, res, next) => {
+  try {
+    const { page = 0, size = 10, status } = req.query;
+    const data = await getPatientAlerts(req.user._id, parseInt(page), parseInt(size), status);
+    res.json(successResponse('Patient alerts retrieved successfully.', data));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Get vital signs history
  */
 export const getVitalsHistoryController = async (req, res, next) => {
@@ -202,13 +215,29 @@ export const notifyDoctorForCriticalVitalsController = async (req, res, next) =>
     }
 
     res.json({ success: true, message: 'Doctor notified and emergency contact email sent.' });
+    
+    // Log consultation notification
+    await logSuccess({
+      req,
+      userId: req.user._id,
+      action: 'CONSULT_DOCTOR',
+      entityType: 'ALERT',
+      entityId: latestAlert._id,
+      description: `Patient requested consultation with doctor for critical alert`,
+    });
   } catch (error) {
+    await logFailure({
+      req,
+      userId: req.user._id,
+      action: 'CONSULT_DOCTOR',
+      entityType: 'ALERT',
+      description: 'Failed to request doctor consultation',
+      error,
+    });
     next(error);
   }
 };
-/**
- * Upload vitals CSV file and process critical alerts
- */
+
 export const uploadVitalsCSVController = async (req, res, next) => {
   try {
     if (!req.file) {
@@ -220,8 +249,25 @@ export const uploadVitalsCSVController = async (req, res, next) => {
     const csvContent = req.file.buffer.toString('utf-8');
     const result = await processVitalsCSV(req.user._id, csvContent);
     
+    // Log vitals upload
+    await logSuccess({
+      req,
+      userId: req.user._id,
+      action: 'UPLOAD_VITALS',
+      entityType: 'PATIENT',
+      description: `Patient uploaded vitals CSV - ${result.recordsProcessed || 0} records${result.criticalAlert ? ' (CRITICAL)' : ''}`,
+    });
+    
     res.json(successResponse('Vitals uploaded successfully. ' + (result.criticalAlert ? 'Critical vitals detected!' : ''), result));
   } catch (error) {
+    await logFailure({
+      req,
+      userId: req.user._id,
+      action: 'UPLOAD_VITALS',
+      entityType: 'PATIENT',
+      description: 'Vitals upload failed',
+      error,
+    });
     next(error);
   }
 };
@@ -255,14 +301,22 @@ export const updatePatientProfileController = async (req, res, next) => {
 export const getAvailableDoctorsController = async (req, res, next) => {
   try {
     const Doctor = (await import('../models/Doctor.js')).default;
+    const User = (await import('../models/User.js')).default;
     
-    const doctors = await Doctor.find({ approval_status: 'APPROVED' })
-      .populate('user_id', 'full_name email')
+    // Get all approved doctors
+    const doctors = await Doctor.find({ application_status: 'APPROVED' })
+      .populate('user_id', 'full_name email is_active')
       .select('specialization qualifications license_number')
       .lean();
     
-    const formattedDoctors = doctors.map(doc => ({
+    // Filter out doctors with inactive user accounts
+    const activeDoctors = doctors.filter(doc => 
+      doc.user_id && doc.user_id.is_active === true
+    );
+    
+    const formattedDoctors = activeDoctors.map(doc => ({
       id: doc._id.toString(),
+      user_id: doc.user_id?._id?.toString(),
       name: doc.user_id?.full_name || 'Unknown',
       email: doc.user_id?.email || '',
       specialization: doc.specialization || 'General',
@@ -272,6 +326,121 @@ export const getAvailableDoctorsController = async (req, res, next) => {
 
     res.json(successResponse('Available doctors retrieved.', formattedDoctors));
   } catch (error) {
+    next(error);
+  }
+};
+/**
+ * Create patient-initiated alert and send to selected doctor
+ */
+export const createPatientAlertController = async (req, res, next) => {
+  try {
+    const { doctorId, alertType, severity, title, message } = req.body;
+
+    // Validate required fields
+    if (!doctorId || !alertType || !severity || !title || !message) {
+      const error = new Error('Missing required fields: doctorId, alertType, severity, title, message');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (!['CRITICAL', 'WARNING', 'INFO'].includes(alertType)) {
+      const error = new Error('Invalid alert type. Must be CRITICAL, WARNING, or INFO');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const Patient = (await import('../models/Patient.js')).default;
+    const Doctor = (await import('../models/Doctor.js')).default;
+    const AlertModel = (await import('../models/Alert.js')).default;
+
+    // Get patient and doctor records
+    const patient = await Patient.findOne({ user_id: req.user._id }).populate('user_id');
+    if (!patient) throw new Error('Patient record not found');
+    
+    // Check if patient is active
+    if (!patient.user_id?.is_active) {
+      const error = new Error('Your account is inactive. Please contact support.');
+      error.statusCode = 403;
+      throw error;
+    }
+
+    const doctor = await Doctor.findById(doctorId).populate('user_id');
+    if (!doctor) throw new Error('Doctor not found');
+    
+    // Check if doctor is active and approved
+    if (doctor.application_status !== 'APPROVED') {
+      const error = new Error('Selected doctor is not approved.');
+      error.statusCode = 400;
+      throw error;
+    }
+    
+    if (!doctor.user_id?.is_active) {
+      const error = new Error('Selected doctor is currently unavailable.');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    // Create the alert
+    const alert = await AlertModel.create({
+      patient_id: patient._id,
+      doctor_id: doctorId,
+      alert_type: alertType,
+      severity,
+      title,
+      message,
+      status: 'ACTIVE',
+    });
+
+    // Emit real-time notification to doctor
+    const { getIO } = await import('../config/socket.js');
+    const io = getIO();
+    io.to(`doctor:${doctorId}`).emit('patientAlert', {
+      alertId: alert._id,
+      patientId: patient._id,
+      doctorId,
+      alert: {
+        id: alert._id,
+        type: alert.alert_type,
+        severity: alert.severity,
+        title: alert.title,
+        message: alert.message,
+        timestamp: alert.created_at,
+      },
+      patient: {
+        id: patient._id,
+        name: patient.user_id?.full_name,
+        email: patient.user_id?.email,
+      },
+    });
+
+    // Log alert creation
+    await logSuccess({
+      req,
+      userId: req.user._id,
+      action: 'CREATE_ALERT',
+      entityType: 'ALERT',
+      entityId: alert._id,
+      description: `Patient created ${alertType} alert for doctor consultation`,
+    });
+
+    res.json(successResponse('Alert created and sent to doctor.', {
+      alert: {
+        id: alert._id,
+        type: alert.alert_type,
+        severity: alert.severity,
+        title: alert.title,
+        message: alert.message,
+      },
+    }));
+  } catch (error) {
+    await logFailure({
+      req,
+      userId: req.user._id,
+      action: 'CREATE_ALERT',
+      entityType: 'ALERT',
+      description: 'Failed to create patient alert',
+      error,
+    });
     next(error);
   }
 };

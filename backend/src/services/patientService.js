@@ -105,6 +105,9 @@ export const getPatientDashboardData = async (userId) => {
           { expires_at: { $exists: false } },
           { expires_at: { $gte: now } }
         ]
+      }).populate({
+        path: 'doctor_id',
+        populate: { path: 'user_id', select: 'full_name' }
       }).sort({ created_at: -1 }).limit(5).lean()
     ]);
 
@@ -122,11 +125,65 @@ export const getPatientDashboardData = async (userId) => {
         id: a._id,
         message: a.message,
         category: a.alert_type,
-        timestamp: a.created_at
+        timestamp: a.created_at,
+        doctor_id: a.doctor_id?._id,
+        doctor_name: a.doctor_id?.user_id?.full_name,
+        resolved_at: a.resolved_at,
+        status: a.status
       }))
     };
   } catch (error) {
     throw new Error(`Dashboard aggregation failed: ${error.message}`);
+  }
+};
+
+/**
+ * Get paginated alerts for a patient
+ */
+export const getPatientAlerts = async (userId, page = 0, size = 10, status) => {
+  try {
+    const patient = await Patient.findOne({ user_id: userId }).lean();
+    if (!patient) throw new Error('Patient record not found');
+
+    const query = { patient_id: patient._id };
+    if (status) query.status = status;
+
+    const alerts = await Alert.find(query)
+      .populate({
+        path: 'doctor_id',
+        populate: { path: 'user_id', select: 'full_name name email' },
+      })
+      .sort({ created_at: -1 })
+      .skip(page * size)
+      .limit(size)
+      .lean();
+
+    const totalElements = await Alert.countDocuments(query);
+    const totalPages = Math.ceil(totalElements / size);
+
+    const content = alerts.map((a) => ({
+      id: a._id,
+      message: a.message,
+      category: a.alert_type,
+      timestamp: a.created_at,
+      doctor_id: a.doctor_id?._id,
+      doctor_name: a.doctor_id?.user_id?.full_name || a.doctor_id?.user_id?.name || null,
+      resolved_at: a.resolved_at,
+      status: a.status,
+      severity: a.severity,
+    }));
+
+    return {
+      content,
+      pageNumber: page,
+      pageSize: size,
+      totalElements,
+      totalPages,
+      hasNext: page < totalPages - 1,
+      hasPrevious: page > 0,
+    };
+  } catch (error) {
+    throw new Error(`Failed to fetch patient alerts: ${error.message}`);
   }
 };
 

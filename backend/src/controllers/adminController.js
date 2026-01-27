@@ -27,6 +27,8 @@ import {
   getAllPatientsForDownload,
   formatPatientsForCSV,
   formatPatientsForCSVWithData,
+  getAllAlertsForDownload,
+  formatAlertsForCSV,
 } from '../services/adminService.js';
 import { successResponse, errorResponse } from '../utils/response.js';
 import { logSuccess, logFailure } from '../utils/logger.js';
@@ -662,8 +664,8 @@ export const getPaginatedAppointmentsController = async (req, res, next) => {
  */
 export const getPaginatedAlertsController = async (req, res, next) => {
   try {
-    const { page = 0, size = 10 } = req.query;
-    const data = await getPaginatedAlerts(parseInt(page), parseInt(size));
+    const { page = 0, size = 10, status } = req.query;
+    const data = await getPaginatedAlerts(parseInt(page), parseInt(size), status);
     res.json(successResponse('Paginated alerts retrieved successfully.', data));
   } catch (error) {
     next(error);
@@ -736,6 +738,114 @@ export const managePatientStatusController = async (req, res, next) => {
       description: `Patient status change failed`,
       error,
     });
+    next(error);
+  }
+};
+
+/**
+ * Download alerts data (CSV or JSON or PDF)
+ */
+export const downloadAlertsController = async (req, res, next) => {
+  try {
+    const { format = 'csv' } = req.query;
+    const data = await getAllAlertsForDownload();
+    const fmt = String(format).toLowerCase();
+
+    if (fmt === 'json') {
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', 'attachment; filename="system_alerts.json"');
+      return res.status(200).send(JSON.stringify(data, null, 2));
+    }
+
+    if (fmt === 'pdf') {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename="system_alerts.pdf"');
+
+      const doc = new PDFDocument({ margin: 36, layout: 'landscape' });
+      doc.pipe(res);
+
+      doc.fontSize(20).text('System Alerts Report', { align: 'center' });
+      doc.moveDown(0.2);
+      doc.fontSize(10).fillColor('#666').text(`Professional Healthcare Platform | Generated: ${new Date().toLocaleString()}`, { align: 'center' });
+      doc.moveDown(1.5);
+
+      const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+      const columns = [
+        { key: 'title', label: 'Alert Title', width: pageWidth * 0.20 },
+        { key: 'severity', label: 'Severity', width: pageWidth * 0.12 },
+        { key: 'status', label: 'Status', width: pageWidth * 0.12 },
+        { key: 'patientName', label: 'Patient', width: pageWidth * 0.15 },
+        { key: 'doctorName', label: 'Doctor', width: pageWidth * 0.15 },
+        { key: 'createdAt', label: 'Created', width: pageWidth * 0.15 },
+        { key: 'resolvedAt', label: 'Resolved', width: pageWidth * 0.11 },
+      ];
+
+      const startX = doc.page.margins.left;
+      const padding = 4;
+      const headerRow = columns.reduce((acc, c) => ({ ...acc, [c.key]: c.label }), {});
+
+      const measureRowHeight = (row, isHeader = false) => {
+        const heights = columns.map((col) => {
+          const text = row[col.key] ? String(row[col.key]) : '';
+          doc.fontSize(isHeader ? 10 : 9);
+          return doc.heightOfString(text, { width: col.width - padding * 2 }) + padding * 2;
+        });
+        return Math.max(isHeader ? 22 : 18, ...heights);
+      };
+
+      const drawRow = (row, isHeader = false) => {
+        const height = measureRowHeight(row, isHeader);
+        if (doc.y + height > doc.page.height - doc.page.margins.bottom) {
+          doc.addPage();
+          doc.y = doc.page.margins.top;
+          drawRow(headerRow, true);
+        }
+
+        let currX = startX;
+        const currY = doc.y;
+
+        columns.forEach((col) => {
+          const text = row[col.key] ? String(row[col.key]) : '';
+
+          if (isHeader) {
+            doc.save().rect(currX, currY, col.width, height).fill('#f8fafc').restore();
+          }
+          doc.rect(currX, currY, col.width, height).lineWidth(0.5).stroke('#e2e8f0');
+
+          doc.save();
+          doc.rect(currX + padding, currY + padding, col.width - padding * 2, height - padding * 2).clip();
+          doc.fontSize(isHeader ? 10 : 9)
+            .fillColor(isHeader ? '#0f172a' : '#334155')
+            .text(text, currX + padding, currY + padding, {
+              width: col.width - padding * 2,
+              align: 'left',
+              lineBreak: true
+            });
+          doc.restore();
+          currX += col.width;
+        });
+        doc.y = currY + height;
+      };
+
+      drawRow(headerRow, true);
+      data.forEach(item => {
+        drawRow({
+          ...item,
+          createdAt: item.createdAt ? new Date(item.createdAt).toLocaleDateString() : 'N/A',
+          resolvedAt: item.resolvedAt !== 'N/A' ? new Date(item.resolvedAt).toLocaleDateString() : 'N/A'
+        });
+      });
+
+      doc.end();
+      return;
+    }
+
+    // CSV formatting via service
+    const csvContent = await formatAlertsForCSV();
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="system_alerts.csv"');
+    return res.status(200).send(csvContent);
+  } catch (error) {
     next(error);
   }
 };

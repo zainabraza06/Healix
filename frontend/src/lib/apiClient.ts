@@ -380,6 +380,13 @@ class ApiClient {
     return response.data as Blob;
   }
 
+  async downloadAlerts(format: 'csv' | 'json' | 'pdf' = 'csv'): Promise<Blob> {
+    const response = await this.client.get(`/admin/alerts/export?format=${format}`, {
+      responseType: 'blob',
+    });
+    return response.data as Blob;
+  }
+
   async downloadDoctors(format: 'csv' | 'json' | 'pdf' = 'csv'): Promise<Blob> {
     const response = await this.client.get(`/admin/doctors/download?format=${format}`, {
       responseType: 'blob',
@@ -432,6 +439,35 @@ class ApiClient {
     const response = await this.client.post(`/chat/doctor/${patientId}/message`, { text });
     return response.data;
   }
+
+  // Logs
+  async getMyActivityLogs(page: number = 0, size: number = 20): Promise<ApiResponse<any>> {
+    const response = await this.client.get(`/logs/activity/my?page=${page}&size=${size}`);
+    return response.data;
+  }
+
+  async getAllLogs(filters?: any, page: number = 0, size: number = 50): Promise<ApiResponse<any>> {
+    let query = `?page=${page}&size=${size}`;
+    if (filters?.userId) query += `&userId=${filters.userId}`;
+    if (filters?.level) query += `&level=${filters.level}`;
+    if (filters?.action) query += `&action=${filters.action}`;
+    if (filters?.entityType) query += `&entityType=${filters.entityType}`;
+    if (filters?.status) query += `&status=${filters.status}`;
+    
+    const response = await this.client.get(`/logs/${query}`);
+    return response.data;
+  }
+
+    async getUserActivityLogs(userId: string, page: number = 0, size: number = 50): Promise<ApiResponse<any>> {
+      const response = await this.client.get(`/logs/user/${userId}?page=${page}&size=${size}`);
+      return response.data;
+    }
+
+  async createPatientAlert(data: any): Promise<ApiResponse<any>> {
+    const response = await this.client.post('/patient/alert/create', data);
+    return response.data;
+  }
 }
 
 export const apiClient = new ApiClient();
+

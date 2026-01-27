@@ -2,8 +2,9 @@
 
 import { useAuthStore } from '@/lib/authStore';
 import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Loader } from 'lucide-react';
+import ChatModal, { FloatingChatButton } from './ChatModal';
 
 interface ProtectedLayoutProps {
   children: React.ReactNode;
@@ -16,6 +17,7 @@ export default function ProtectedLayout({
 }: ProtectedLayoutProps) {
   const router = useRouter();
   const { user, isCheckAuthLoading } = useAuthStore();
+  const [showChatModal, setShowChatModal] = useState(false);
 
   useEffect(() => {
     if (!isCheckAuthLoading) {
@@ -37,5 +39,20 @@ export default function ProtectedLayout({
 
   if (!user) return null;
 
-  return <>{children}</>;
+  return (
+    <>
+      {children}
+      
+      {/* Unified Floating Chat Button for all roles */}
+      {(user.role === 'PATIENT' || user.role === 'DOCTOR') && (
+        <>
+          <FloatingChatButton onClick={() => setShowChatModal(true)} />
+          <ChatModal
+            isOpen={showChatModal}
+            onClose={() => setShowChatModal(false)}
+          />
+        </>
+      )}
+    </>
+  );
 }

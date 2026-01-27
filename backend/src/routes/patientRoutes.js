@@ -7,7 +7,9 @@ import {
     notifyDoctorForCriticalVitalsController,
     getPatientProfileController,
     updatePatientProfileController,
-    getAvailableDoctorsController
+    getAvailableDoctorsController,
+    createPatientAlertController,
+    getPatientAlertsController
 } from '../controllers/patientController.js';
 import {
     getMedicalRecordsController,
@@ -31,12 +33,7 @@ router.get('/vitals/csv-template', downloadVitalsCSVTemplateController);
 router.post('/vitals/upload-csv', upload.single('file'), uploadVitalsCSVController);
 router.post('/vitals/consultation-notify', notifyDoctorForCriticalVitalsController);
 
-// Profile
-router.get('/profile', getPatientProfileController);
-router.put('/profile', updatePatientProfileController);
-
-// Medical Records
-router.get('/medical-records', getMedicalRecordsController);
-router.post('/medical-records/:type', addMedicalRecordEntryController);
-
+// Alerts
+router.get('/alerts', getPatientAlertsController);
+router.post('/alert/create', createPatientAlertController);
 export default router;
