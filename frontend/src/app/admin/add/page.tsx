@@ -10,7 +10,7 @@ import dynamic from 'next/dynamic';
 
 // Dynamically import 3D components to avoid SSR issues
 const Scene = dynamic(() => import('@/components/canvas/Scene'), { ssr: false });
-const FloatingIcons = dynamic(() => import('@/components/canvas/FloatingIcons').then(mod => mod.FloatingIcons), { ssr: false });
+const FloatingIcons = dynamic(() => import('@/components/canvas/FloatingIcons'), { ssr: false });
 
 export default function AddAdminPage() {
   const router = useRouter();

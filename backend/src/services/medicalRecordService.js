@@ -49,7 +49,9 @@ export const getPatientMedicalRecords = async (userId) => {
                     doctorName: a.doctor_id?.user_id?.full_name || 'Doctor',
                     notes: a.notes,
                     type: a.appointment_type,
-                    prescription: a.prescription_id || null
+                    prescription_id: a.prescription_id || null, // The related prescription model
+                    prescription: a.prescription || null,      // The prescription string
+                    instructions: a.instructions || null       // The instructions string
                 })),
                 alerts: alerts.map(a => ({
                     id: a._id,
@@ -58,8 +60,9 @@ export const getPatientMedicalRecords = async (userId) => {
                     severity: a.severity,
                     date: a.created_at,
                     status: a.status,
-                    instructions: a.instructions || null,
-                    prescription: a.prescription_id || null,
+                    instructions: a.instructions || null,      // The instructions string
+                    prescription_id: a.prescription_id || null, // The related prescription model
+                    prescription: a.prescription || null,       // The prescription string
                     doctorName: a.doctor_id?.user_id?.full_name || 'Doctor',
                     resolvedAt: a.resolved_at || null,
                     resolvedBy: a.resolved_by || null,
@@ -183,7 +186,7 @@ export const generateMedicalRecordsPDF = async (patientId, res) => {
         const drawTable = (headers, rows, columnWidths, rowRenderer) => {
             checkPageBreak(60);
             const headerY = doc.y;
-            
+
             // Draw header
             doc.rect(MARGIN, headerY, CONTENT_WIDTH, 25).fill(COLORS.headerBg).stroke(COLORS.border);
             let xPos = MARGIN + 8;
@@ -192,9 +195,9 @@ export const generateMedicalRecordsPDF = async (patientId, res) => {
                 doc.text(header, xPos, headerY + 8, { width: columnWidths[index] });
                 xPos += columnWidths[index] + 10;
             });
-            
+
             doc.y = headerY + 35;
-            
+
             // Draw rows
             rows.forEach((row, index) => {
                 checkPageBreak(35);
@@ -202,7 +205,7 @@ export const generateMedicalRecordsPDF = async (patientId, res) => {
                 rowRenderer(row, rowY);
                 doc.y = rowY + 35;
             });
-            
+
             doc.moveDown(0.5);
         };
 
@@ -211,7 +214,7 @@ export const generateMedicalRecordsPDF = async (patientId, res) => {
 
         // 1. Patient Profile Card (Table Style)
         drawSectionTitle('Patient Information');
-        
+
         const birthDate = patient.user_id?.date_of_birth ? new Date(patient.user_id.date_of_birth).toLocaleDateString() : 'N/A';
         drawTableRow('Full Name:', patient.user_id?.full_name?.toUpperCase() || 'ANONYMOUS');
         drawTableRow('Patient ID:', patient._id.toString());
@@ -325,18 +328,19 @@ export const generateMedicalRecordsPDF = async (patientId, res) => {
                 doc.font('Helvetica').fontSize(9);
                 const messageHeight = alert.message ? doc.heightOfString(alert.message, { width: CONTENT_WIDTH - 50 }) + 15 : 0;
                 const instructionsHeight = alert.instructions ? doc.heightOfString(alert.instructions, { width: CONTENT_WIDTH - 50 }) + 25 : 0;
-                
-                // Calculate meds height
+                const prescriptionStrHeight = alert.prescription ? doc.heightOfString(alert.prescription, { width: CONTENT_WIDTH - 50 }) + 25 : 0;
+
+                // Calculate meds height (from model)
                 let medsHeight = 0;
-                if (alert.prescription?.medications?.length > 0) {
+                if (alert.prescription_id?.medications?.length > 0) {
                     medsHeight = 25; // For the "Prescribed Medications:" heading
-                    alert.prescription.medications.forEach(med => {
+                    alert.prescription_id.medications.forEach(med => {
                         const medText = `• ${med.name} - ${med.dosage}, ${med.frequency} for ${med.duration}`;
                         medsHeight += doc.heightOfString(medText, { width: CONTENT_WIDTH - 60 }) + 5;
                     });
                 }
-                
-                const totalHeight = 40 + messageHeight + instructionsHeight + medsHeight + 20;
+
+                const totalHeight = 40 + messageHeight + instructionsHeight + prescriptionStrHeight + medsHeight + 20;
 
                 checkPageBreak(totalHeight + 20);
 
@@ -345,32 +349,32 @@ export const generateMedicalRecordsPDF = async (patientId, res) => {
 
                 // Alert container with subtle border
                 doc.rect(MARGIN, alertY, CONTENT_WIDTH, totalHeight)
-                   .fillAndStroke('#ffffff', COLORS.border);
-                
+                    .fillAndStroke('#ffffff', COLORS.border);
+
                 // Alert header with severity indicator
                 doc.rect(MARGIN, alertY, 5, 25).fill(severityColor);
                 doc.rect(MARGIN + 5, alertY, CONTENT_WIDTH - 5, 25).fill(severityColor + '15');
-                
+
                 // Alert title and severity
                 doc.fillColor(severityColor).fontSize(11).font('Helvetica-Bold');
                 doc.text(alert.severity, MARGIN + 15, alertY + 8, { width: 80 });
-                
+
                 doc.fillColor(COLORS.slate800).fontSize(11).font('Helvetica-Bold');
                 const title = alert.title || 'Medical Alert';
                 doc.text(title, MARGIN + 100, alertY + 8, { width: 200 });
-                
+
                 // Status and date
-                const statusColor = alert.status === 'RESOLVED' ? COLORS.emerald : 
-                                  (alert.status === 'ACTIVE' ? '#f59e0b' : COLORS.slate600);
-                
+                const statusColor = alert.status === 'RESOLVED' ? COLORS.emerald :
+                    (alert.status === 'ACTIVE' ? '#f59e0b' : COLORS.slate600);
+
                 doc.fillColor(statusColor).fontSize(9).font('Helvetica-Bold');
                 doc.text(alert.status, MARGIN + 310, alertY + 8, { width: 80 });
-                
+
                 doc.fillColor(COLORS.slate600).fontSize(9).font('Helvetica');
-                doc.text(new Date(alert.date).toLocaleDateString('en-US', { 
-                    year: 'numeric', 
-                    month: 'short', 
-                    day: 'numeric' 
+                doc.text(new Date(alert.date).toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric'
                 }), MARGIN + 400, alertY + 8, { width: 150 });
 
                 let contentY = alertY + 35;
@@ -387,11 +391,11 @@ export const generateMedicalRecordsPDF = async (patientId, res) => {
                     doc.fillColor(COLORS.slate600).fontSize(9).font('Helvetica-Bold');
                     doc.text('Alert Details:', MARGIN + 15, contentY);
                     contentY += 12;
-                    
+
                     doc.fillColor(COLORS.slate800).fontSize(9).font('Helvetica');
-                    doc.text(alert.message, MARGIN + 25, contentY, { 
-                        width: CONTENT_WIDTH - 50, 
-                        lineGap: 3 
+                    doc.text(alert.message, MARGIN + 25, contentY, {
+                        width: CONTENT_WIDTH - 50,
+                        lineGap: 3
                     });
                     contentY += messageHeight;
                 }
@@ -401,28 +405,42 @@ export const generateMedicalRecordsPDF = async (patientId, res) => {
                     doc.fillColor(COLORS.slate600).fontSize(9).font('Helvetica-Bold');
                     doc.text('Medical Instructions:', MARGIN + 15, contentY);
                     contentY += 12;
-                    
+
                     doc.fillColor(COLORS.slate800).fontSize(9).font('Helvetica');
-                    doc.text(alert.instructions, MARGIN + 25, contentY, { 
-                        width: CONTENT_WIDTH - 50, 
-                        lineGap: 3 
+                    doc.text(alert.instructions, MARGIN + 25, contentY, {
+                        width: CONTENT_WIDTH - 50,
+                        lineGap: 3
                     });
                     contentY += instructionsHeight - 12;
                 }
 
-                // Prescription (with proper subheading and bullet points)
-                if (alert.prescription?.medications?.length > 0) {
+                // Prescription String (if provided as text)
+                if (alert.prescription) {
+                    doc.fillColor(COLORS.slate600).fontSize(9).font('Helvetica-Bold');
+                    doc.text('Prescription:', MARGIN + 15, contentY);
+                    contentY += 12;
+
+                    doc.fillColor(COLORS.slate800).fontSize(9).font('Helvetica');
+                    doc.text(alert.prescription, MARGIN + 25, contentY, {
+                        width: CONTENT_WIDTH - 50,
+                        lineGap: 3
+                    });
+                    contentY += prescriptionStrHeight - 12;
+                }
+
+                // Prescribed Medications (from model)
+                if (alert.prescription_id?.medications?.length > 0) {
                     doc.fillColor(COLORS.slate600).fontSize(9).font('Helvetica-Bold');
                     doc.text('Prescribed Medications:', MARGIN + 15, contentY);
                     contentY += 15;
-                    
+
                     doc.fillColor(COLORS.slate800).fontSize(9).font('Helvetica');
-                    alert.prescription.medications.forEach((med, idx) => {
+                    alert.prescription_id.medications.forEach((med, idx) => {
                         const medText = `• ${med.name} - ${med.dosage}, ${med.frequency} for ${med.duration}`;
                         const medHeight = doc.heightOfString(medText, { width: CONTENT_WIDTH - 60 }) + 3;
-                        doc.text(medText, MARGIN + 25, contentY, { 
+                        doc.text(medText, MARGIN + 25, contentY, {
                             width: CONTENT_WIDTH - 60,
-                            lineGap: 2 
+                            lineGap: 2
                         });
                         contentY += medHeight;
                     });
@@ -434,19 +452,19 @@ export const generateMedicalRecordsPDF = async (patientId, res) => {
                     doc.fillColor(COLORS.emerald).fontSize(8).font('Helvetica-Bold');
                     doc.text('RESOLUTION DETAILS', MARGIN + 15, contentY);
                     contentY += 10;
-                    
+
                     doc.fillColor(COLORS.slate700).fontSize(9).font('Helvetica');
-                    
+
                     if (alert.resolvedByName) {
                         doc.text(`Resolved by: ${alert.resolvedByName}`, MARGIN + 25, contentY, { width: CONTENT_WIDTH - 50 });
                         contentY += 12;
                     }
-                    
+
                     if (alert.resolvedAt) {
-                        const resolvedDate = new Date(alert.resolvedAt).toLocaleDateString('en-US', { 
-                            year: 'numeric', 
-                            month: 'short', 
-                            day: 'numeric' 
+                        const resolvedDate = new Date(alert.resolvedAt).toLocaleDateString('en-US', {
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric'
                         });
                         doc.text(`Resolved on: ${resolvedDate}`, MARGIN + 25, contentY, { width: CONTENT_WIDTH - 50 });
                         contentY += 12;
@@ -458,24 +476,24 @@ export const generateMedicalRecordsPDF = async (patientId, res) => {
                     const expiryDate = new Date(alert.expiresAt);
                     const today = new Date();
                     const daysUntilExpiry = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
-                    
+
                     if (daysUntilExpiry >= 0) {
                         contentY += 10;
-                        const expiryColor = daysUntilExpiry <= 3 ? '#ef4444' : 
-                                          (daysUntilExpiry <= 7 ? '#f59e0b' : COLORS.slate600);
-                        
+                        const expiryColor = daysUntilExpiry <= 3 ? '#ef4444' :
+                            (daysUntilExpiry <= 7 ? '#f59e0b' : COLORS.slate600);
+
                         doc.fillColor(expiryColor).fontSize(8).font('Helvetica-Bold');
                         doc.text('EXPIRY NOTICE', MARGIN + 15, contentY);
                         contentY += 10;
-                        
+
                         doc.fillColor(COLORS.slate700).fontSize(9).font('Helvetica');
-                        doc.text(`Expires: ${expiryDate.toLocaleDateString()} (in ${daysUntilExpiry} days)`, 
-                               MARGIN + 25, contentY, { width: CONTENT_WIDTH - 50 });
+                        doc.text(`Expires: ${expiryDate.toLocaleDateString()} (in ${daysUntilExpiry} days)`,
+                            MARGIN + 25, contentY, { width: CONTENT_WIDTH - 50 });
                     }
                 }
 
                 doc.y = contentY + 15;
-                
+
                 // Separator line (except for last alert)
                 if (index < records.history.alerts.length - 1) {
                     doc.moveTo(MARGIN, doc.y).lineTo(WIDTH - MARGIN, doc.y).stroke(COLORS.border);
@@ -494,45 +512,47 @@ export const generateMedicalRecordsPDF = async (patientId, res) => {
             records.history.completedAppointments.forEach((apt, index) => {
                 // Calculate required height
                 const notesHeight = apt.notes ? doc.heightOfString(apt.notes, { width: CONTENT_WIDTH - 50 }) + 30 : 0;
-                
-                // Calculate meds height
+                const instructionsHeight = apt.instructions ? doc.heightOfString(apt.instructions, { width: CONTENT_WIDTH - 50 }) + 30 : 0;
+                const prescriptionStrHeight = apt.prescription ? doc.heightOfString(apt.prescription, { width: CONTENT_WIDTH - 50 }) + 30 : 0;
+
+                // Calculate meds height (from model)
                 let medsHeight = 0;
-                if (apt.prescription?.medications?.length > 0) {
+                if (apt.prescription_id?.medications?.length > 0) {
                     medsHeight = 25; // For the "Prescriptions:" heading
-                    apt.prescription.medications.forEach(med => {
+                    apt.prescription_id.medications.forEach(med => {
                         const medText = `• ${med.name} - ${med.dosage}, ${med.frequency} for ${med.duration}`;
                         medsHeight += doc.heightOfString(medText, { width: CONTENT_WIDTH - 60 }) + 5;
                     });
                 }
-                
-                const totalHeight = 40 + notesHeight + medsHeight;
+
+                const totalHeight = 40 + notesHeight + instructionsHeight + prescriptionStrHeight + medsHeight;
 
                 checkPageBreak(totalHeight + 20);
 
                 const aptY = doc.y;
-                
+
                 // Appointment container
                 doc.rect(MARGIN, aptY, CONTENT_WIDTH, totalHeight)
-                   .fillAndStroke('#ffffff', COLORS.border);
-                
+                    .fillAndStroke('#ffffff', COLORS.border);
+
                 // Appointment header with colored accent
                 doc.rect(MARGIN, aptY, CONTENT_WIDTH, 25).fill(COLORS.teal + '15');
                 doc.rect(MARGIN, aptY, 5, 25).fill(COLORS.teal);
-                
+
                 // Appointment header text
                 doc.fillColor(COLORS.teal).fontSize(11).font('Helvetica-Bold');
                 doc.text(apt.type.toUpperCase(), MARGIN + 15, aptY + 8, { width: 150 });
-                
+
                 doc.fillColor(COLORS.slate800).fontSize(11).font('Helvetica-Bold');
                 doc.text(`Dr. ${apt.doctorName}`, MARGIN + 170, aptY + 8, { width: 200 });
-                
+
                 doc.fillColor(COLORS.slate600).fontSize(9).font('Helvetica');
-                doc.text(new Date(apt.date).toLocaleDateString('en-US', { 
-                    year: 'numeric', 
-                    month: 'short', 
-                    day: 'numeric' 
+                doc.text(new Date(apt.date).toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric'
                 }), MARGIN + 380, aptY + 8, { width: 150 });
-                
+
                 let contentY = aptY + 35;
 
                 // Notes (with proper subheading)
@@ -540,35 +560,63 @@ export const generateMedicalRecordsPDF = async (patientId, res) => {
                     doc.fillColor(COLORS.slate600).fontSize(9).font('Helvetica-Bold');
                     doc.text('Clinical Notes:', MARGIN + 15, contentY);
                     contentY += 12;
-                    
+
                     doc.fillColor(COLORS.slate800).fontSize(9).font('Helvetica');
-                    doc.text(apt.notes, MARGIN + 25, contentY, { 
-                        width: CONTENT_WIDTH - 50, 
-                        lineGap: 3 
+                    doc.text(apt.notes, MARGIN + 25, contentY, {
+                        width: CONTENT_WIDTH - 50,
+                        lineGap: 3
                     });
                     contentY += notesHeight - 12;
                 }
 
-                // Prescriptions (with proper subheading and bullet points)
-                if (apt.prescription?.medications?.length > 0) {
+                // Instructions string
+                if (apt.instructions) {
                     doc.fillColor(COLORS.slate600).fontSize(9).font('Helvetica-Bold');
-                    doc.text('Prescriptions:', MARGIN + 15, contentY);
-                    contentY += 15;
-                    
+                    doc.text('Medical Instructions:', MARGIN + 15, contentY);
+                    contentY += 12;
+
                     doc.fillColor(COLORS.slate800).fontSize(9).font('Helvetica');
-                    apt.prescription.medications.forEach((med, idx) => {
+                    doc.text(apt.instructions, MARGIN + 25, contentY, {
+                        width: CONTENT_WIDTH - 50,
+                        lineGap: 3
+                    });
+                    contentY += instructionsHeight - 12;
+                }
+
+                // Prescription string
+                if (apt.prescription) {
+                    doc.fillColor(COLORS.slate600).fontSize(9).font('Helvetica-Bold');
+                    doc.text('Prescription:', MARGIN + 15, contentY);
+                    contentY += 12;
+
+                    doc.fillColor(COLORS.slate800).fontSize(9).font('Helvetica');
+                    doc.text(apt.prescription, MARGIN + 25, contentY, {
+                        width: CONTENT_WIDTH - 50,
+                        lineGap: 3
+                    });
+                    contentY += prescriptionStrHeight - 12;
+                }
+
+                // Prescribed medications from model
+                if (apt.prescription_id?.medications?.length > 0) {
+                    doc.fillColor(COLORS.slate600).fontSize(9).font('Helvetica-Bold');
+                    doc.text('Prescribed Medications:', MARGIN + 15, contentY);
+                    contentY += 15;
+
+                    doc.fillColor(COLORS.slate800).fontSize(9).font('Helvetica');
+                    apt.prescription_id.medications.forEach((med, idx) => {
                         const medText = `• ${med.name} - ${med.dosage}, ${med.frequency} for ${med.duration}`;
                         const medHeight = doc.heightOfString(medText, { width: CONTENT_WIDTH - 60 }) + 3;
-                        doc.text(medText, MARGIN + 25, contentY, { 
+                        doc.text(medText, MARGIN + 25, contentY, {
                             width: CONTENT_WIDTH - 60,
-                            lineGap: 2 
+                            lineGap: 2
                         });
                         contentY += medHeight;
                     });
                 }
 
                 doc.y = contentY + 15;
-                
+
                 // Separator line (except for last appointment)
                 if (index < records.history.completedAppointments.length - 1) {
                     doc.moveTo(MARGIN, doc.y).lineTo(WIDTH - MARGIN, doc.y).stroke(COLORS.border);
@@ -591,7 +639,7 @@ export const generateMedicalRecordsPDF = async (patientId, res) => {
         // 6. Footer
         doc.moveDown(2);
         doc.moveTo(MARGIN, doc.y).lineTo(WIDTH - MARGIN, doc.y).stroke(COLORS.border);
-        
+
         doc.moveDown(1);
         doc.fillColor(COLORS.slate400).fontSize(8).font('Helvetica').text(
             'This document is confidential and intended only for authorized medical personnel. HEALIX Systems.',

@@ -17,7 +17,7 @@ import { PieChartWrapper, BarChartWrapper } from '@/components/charts/ChartWrapp
 
 // 3D Background
 const Scene = dynamic(() => import('@/components/canvas/Scene'), { ssr: false });
-const FloatingIcons = dynamic(() => import('@/components/canvas/FloatingIcons').then(mod => mod.FloatingIcons), { ssr: false });
+const FloatingIcons = dynamic(() => import('@/components/canvas/FloatingIcons'), { ssr: false });
 
 import { DoctorDashboard as DoctorDashboardData } from '@/types';
 
@@ -31,7 +31,6 @@ export default function DoctorDashboard() {
   const [selectedAlert, setSelectedAlert] = useState<any>(null);
   const [showCriticalAlertModal, setShowCriticalAlertModal] = useState(false);
   const [criticalAlertCount, setCriticalAlertCount] = useState(0);
-  const [newCriticalAlert, setNewCriticalAlert] = useState<any>(null);
   const [downloadingPatientId, setDownloadingPatientId] = useState<string | null>(null);
 
   // Status Change Request State
@@ -85,7 +84,7 @@ export default function DoctorDashboard() {
   // Socket connection and critical alerts notification
   useEffect(() => {
     if (user && dashboardData?.doctor?._id) {
-      const socket = connectSocket(localStorage.getItem('token') || undefined);
+      connectSocket(localStorage.getItem('token') || undefined);
       joinRooms({ role: 'DOCTOR', doctorId: dashboardData.doctor._id, userId: user.id });
 
       // Check for critical alerts within 24 hours on mount
@@ -107,15 +106,13 @@ export default function DoctorDashboard() {
 
       checkCriticalAlerts();
 
-      // Listen for real-time critical vitals alerts
       const handleCriticalAlert = (data: any) => {
         console.log('Critical alert received:', data);
-        setNewCriticalAlert(data);
         fetchDashboard(); // Refresh dashboard to show new alert
-        
+
         // Show toast notification
         toast.custom((t) => (
-          <div 
+          <div
             onClick={() => {
               toast.dismiss(t.id);
               setSelectedAlert(data);
@@ -147,6 +144,7 @@ export default function DoctorDashboard() {
         offCriticalVitals(handleCriticalAlert);
       };
     }
+    return () => { };
   }, [user, dashboardData?.doctor?._id, dashboardData?.alerts]);
 
   const handleConfirmAppointment = async (id: string) => {
@@ -167,7 +165,7 @@ export default function DoctorDashboard() {
   const handleCancelAppointment = async (id: string) => {
     try {
       setActionLoading(id);
-      const response = await apiClient.cancelAppointment(id, 'Cancelled by doctor');
+      const response = await apiClient.cancelAppointment(id);
       if (response.success) {
         toast.success('Appointment cancelled');
         fetchDashboard();
@@ -223,15 +221,7 @@ export default function DoctorDashboard() {
     { name: 'Alerts', value: dashboardData.stats?.emergencyAlertsCount || 0, color: '#ef4444' },
   ] : [];
 
-  const weeklyActivity = [
-    { name: 'Mon', appointments: 4 },
-    { name: 'Tue', appointments: 7 },
-    { name: 'Wed', appointments: 5 },
-    { name: 'Thu', appointments: 8 },
-    { name: 'Fri', appointments: 6 },
-    { name: 'Sat', appointments: 2 },
-    { name: 'Sun', appointments: 1 },
-  ];
+  const weeklyActivity = dashboardData?.weeklyActivity || [];
 
   return (
     <ProtectedLayout allowedRoles={['DOCTOR']}>
@@ -245,25 +235,36 @@ export default function DoctorDashboard() {
 
         <div className="relative z-10 container-main py-8">
           {/* Header */}
-          <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
-            <div className="animate-fade-in">
-              <h1 className="text-5xl font-black text-slate-800 tracking-tight leading-none mb-3">
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
+            <motion.div
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="animate-fade-in"
+            >
+              <h1 className="text-6xl font-black text-slate-800 tracking-tighter leading-none mb-4">
                 Welcome, <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-600 to-teal-500">Dr. {user?.firstName}</span>
               </h1>
-              <p className="text-slate-500 font-medium text-lg flex items-center gap-2">
-                <Activity className="w-5 h-5 text-emerald-500" />
-                You have {dashboardData?.stats?.appointmentsToday || 0} appointments scheduled for today.
-              </p>
-            </div>
-            <button
+              <div className="flex items-center gap-4">
+                <div className="px-4 py-1.5 bg-emerald-100 text-emerald-700 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-sm">
+                  Full Access
+                </div>
+                <p className="text-slate-500 font-bold text-sm flex items-center gap-2 uppercase tracking-wide opacity-80">
+                  <Activity className="w-4 h-4 text-emerald-500" />
+                  Your Dashboard is up to date
+                </p>
+              </div>
+            </motion.div>
+            <motion.button
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
               onClick={() => setShowPasswordModal(true)}
-              className="px-6 py-3 bg-white/80 backdrop-blur border border-slate-200 rounded-2xl text-slate-700 font-black uppercase tracking-widest hover:bg-emerald-50 hover:border-emerald-200 transition-all flex items-center gap-3 w-fit shadow-lg shadow-emerald-500/5 group"
+              className="px-8 py-4 bg-white/40 backdrop-blur-xl border border-white/60 rounded-2xl text-slate-700 font-black uppercase tracking-[0.2em] text-[10px] hover:bg-emerald-50 hover:border-emerald-200 transition-all flex items-center gap-3 w-fit shadow-2xl shadow-emerald-500/5 group"
             >
-              <div className="p-2 bg-emerald-100 rounded-xl group-hover:bg-emerald-200 transition-colors">
+              <div className="p-2.5 bg-emerald-100 rounded-xl group-hover:bg-emerald-200 transition-colors shadow-sm">
                 <Lock className="w-4 h-4 text-emerald-600" />
               </div>
               Security Settings
-            </button>
+            </motion.button>
           </div>
 
           {/* Error Alert */}
@@ -277,47 +278,87 @@ export default function DoctorDashboard() {
           {/* Stats Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
             {[
-              { label: 'Total Patients', value: dashboardData?.stats?.totalPatients, icon: Users, color: 'blue' },
-              { label: "Today's Schedule", value: dashboardData?.stats?.appointmentsToday, icon: Calendar, color: 'emerald' },
-              { label: 'Avg Wait Time', value: `${dashboardData?.stats?.avgWaitTime}m`, icon: Clock, color: 'orange' },
-              { label: 'Active Alerts', value: dashboardData?.stats?.emergencyAlertsCount, icon: AlertTriangle, color: 'red' },
+              { label: 'Total Patients', value: dashboardData?.stats?.totalPatients, icon: Users, gradient: 'from-blue-500/20 to-indigo-500/20', iconColor: 'text-blue-600' },
+              { label: "Today's Schedule", value: dashboardData?.stats?.appointmentsToday, icon: Calendar, gradient: 'from-emerald-500/20 to-teal-500/20', iconColor: 'text-emerald-600' },
+              { label: 'Avg Wait Time', value: `${dashboardData?.stats?.avgWaitTime}m`, icon: Clock, gradient: 'from-orange-500/20 to-amber-500/20', iconColor: 'text-orange-600' },
+              { label: 'Active Alerts', value: dashboardData?.stats?.emergencyAlertsCount, icon: AlertTriangle, gradient: 'from-red-500/20 to-rose-500/20', iconColor: 'text-red-600' },
             ].map((stat, i) => (
-              <div key={i} className="glass-card p-6 border-white/40 hover:scale-[1.02] transition-transform duration-300">
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.1 }}
+                className="glass-card p-6 border-white/40 hover:scale-[1.02] transition-all duration-300 group cursor-default"
+              >
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-slate-500 text-sm font-bold uppercase tracking-wider mb-1">{stat.label}</p>
-                    <p className="text-3xl font-black text-slate-800">{stat.value || 0}</p>
+                    <p className="text-slate-500 text-xs font-black uppercase tracking-widest mb-1">{stat.label}</p>
+                    <p className="text-3xl font-black text-slate-800 tracking-tight">{stat.value || 0}</p>
                   </div>
-                  <div className={`p-4 bg-${stat.color}-50 text-${stat.color}-600 rounded-2xl`}>
+                  <div className={`p-4 rounded-2xl bg-gradient-to-br ${stat.gradient} ${stat.iconColor} group-hover:scale-110 transition-transform duration-500`}>
                     <stat.icon className="w-6 h-6" />
                   </div>
                 </div>
-              </div>
+              </motion.div>
             ))}
           </div>
 
           {/* Charts Row */}
           <div className="grid lg:grid-cols-3 gap-8 mb-8">
-            <div className="lg:col-span-2 glass-card p-6 border-white/40">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                  <BarChart3 className="w-5 h-5 text-emerald-600" />
-                  Weekly Consultation Activity
+            <motion.div
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="lg:col-span-2 glass-card p-8 border-white/40"
+            >
+              <div className="flex items-center justify-between mb-8">
+                <h2 className="text-2xl font-black text-slate-800 flex items-center gap-3 tracking-tight uppercase">
+                  <div className="p-2 bg-emerald-100 rounded-xl">
+                    <BarChart3 className="w-5 h-5 text-emerald-600" />
+                  </div>
+                  Consultation Activity
                 </h2>
               </div>
-              <div className="h-[300px]">
-                <BarChartWrapper data={weeklyActivity} categoryKey="name" dataKey="appointments" layout="horizontal" />
-              </div>
-            </div>
-            <div className="glass-card p-6 border-white/40">
-              <h2 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
-                <Activity className="w-5 h-5 text-blue-600" />
-                Case Distribution
+              {weeklyActivity && weeklyActivity.length > 0 && weeklyActivity.some(d => d.appointments > 0) ? (
+                <div className="h-[300px]">
+                  <BarChartWrapper data={weeklyActivity} categoryKey="name" dataKey="appointments" layout="horizontal" />
+                </div>
+              ) : (
+                <div className="h-[300px] flex items-center justify-center">
+                  <div className="text-center group">
+                    <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-500">
+                      <BarChart3 className="w-8 h-8 text-slate-300" />
+                    </div>
+                    <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">No activity this week</p>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              className="glass-card p-8 border-white/40"
+            >
+              <h2 className="text-2xl font-black text-slate-800 mb-8 flex items-center gap-3 tracking-tight uppercase">
+                <div className="p-2 bg-blue-100 rounded-xl">
+                  <Activity className="w-5 h-5 text-blue-600" />
+                </div>
+                Case Mix
               </h2>
-              <div className="h-[300px]">
-                <PieChartWrapper data={appointmentDistribution} />
-              </div>
-            </div>
+              {appointmentDistribution && appointmentDistribution.length > 0 && appointmentDistribution.some(d => d.value > 0) ? (
+                <div className="h-[300px]">
+                  <PieChartWrapper data={appointmentDistribution} />
+                </div>
+              ) : (
+                <div className="h-[300px] flex items-center justify-center">
+                  <div className="text-center group">
+                    <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-500">
+                      <Activity className="w-8 h-8 text-slate-300" />
+                    </div>
+                    <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">No case data</p>
+                  </div>
+                </div>
+              )}
+            </motion.div>
           </div>
 
           {/* Main Content Grid */}
@@ -325,30 +366,42 @@ export default function DoctorDashboard() {
             {/* Appointments Column */}
             <div className="lg:col-span-2 space-y-8">
               {/* Upcoming Appointments */}
-              <div className="glass-card p-6 border-white/40">
-                <h2 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
-                  <Calendar className="w-5 h-5 text-emerald-600" />
-                  Upcoming Confirmed Appointments
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="glass-card p-8 border-white/40"
+              >
+                <h2 className="text-2xl font-black text-slate-800 mb-8 flex items-center gap-3 tracking-tight uppercase">
+                  <div className="p-2 bg-emerald-100 rounded-xl">
+                    <Calendar className="w-5 h-5 text-emerald-600" />
+                  </div>
+                  Confirmed Appointments
                 </h2>
                 {dashboardData?.upcomingAppointments && dashboardData.upcomingAppointments.length > 0 ? (
                   <div className="space-y-4">
                     {dashboardData.upcomingAppointments.map((apt: any) => (
-                      <div key={apt.id} className="p-4 bg-white/40 rounded-2xl border border-white/60 hover:bg-white/60 transition group">
+                      <div key={apt.id} className="p-5 bg-white/40 rounded-3xl border border-white/60 hover:bg-white/60 transition-all group">
                         <div className="flex justify-between items-center">
                           <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center text-emerald-600 font-bold group-hover:scale-110 transition-transform">
+                            <div className="w-12 h-12 bg-gradient-to-br from-emerald-100 to-teal-100 rounded-2xl flex items-center justify-center text-emerald-700 font-bold group-hover:scale-110 transition-transform duration-500 shadow-sm">
                               {apt.patientName?.charAt(0) || 'P'}
                             </div>
                             <div>
-                              <p className="font-bold text-slate-800">{apt.patientName || 'Anonymous Patient'}</p>
-                              <p className="text-sm text-slate-500 flex items-center gap-1">
-                                <Clock className="w-3 h-3" />
-                                {new Date(apt.scheduledTime).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
-                              </p>
+                              <p className="font-black text-slate-800 leading-tight">{apt.patientName || 'Anonymous Patient'}</p>
+                              <div className="flex items-center gap-3 mt-1.5">
+                                <span className="text-xs font-bold text-slate-500 flex items-center gap-1.5 uppercase tracking-wide">
+                                  <Calendar className="w-3.5 h-3.5 text-emerald-500" />
+                                  {new Date(apt.scheduledTime).toLocaleDateString()}
+                                </span>
+                                <span className="text-xs font-bold text-slate-500 flex items-center gap-1.5 uppercase tracking-wide">
+                                  <Clock className="w-3.5 h-3.5 text-emerald-500" />
+                                  {new Date(apt.scheduledTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              </div>
                             </div>
                           </div>
                           <div className="flex items-center gap-3">
-                            <span className="px-3 py-1 bg-emerald-100/50 text-emerald-700 rounded-full text-xs font-bold uppercase tracking-wider">
+                            <span className="px-4 py-1.5 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-full text-[10px] font-black uppercase tracking-widest shadow-sm">
                               Confirmed
                             </span>
                           </div>
@@ -357,36 +410,51 @@ export default function DoctorDashboard() {
                     ))}
                   </div>
                 ) : (
-                  <div className="text-center py-12 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
-                    <p className="text-slate-400 font-medium">No confirmed appointments found</p>
+                  <div className="text-center py-16 bg-slate-50/30 rounded-3xl border border-dashed border-slate-200">
+                    <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <Calendar className="w-8 h-8 text-slate-300" />
+                    </div>
+                    <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">No confirmed appointments</p>
                   </div>
                 )}
-              </div>
+              </motion.div>
 
               {/* Appointment Requests */}
               <div className="glass-card p-6 border-white/40">
-                <h2 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
-                  <AlertCircle className="w-5 h-5 text-amber-500" />
-                  New Appointment Requests ({dashboardData?.pendingRequests?.length || 0})
+                <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-3 tracking-tight uppercase">
+                  <div className="p-2 bg-amber-100 rounded-xl">
+                    <AlertCircle className="w-5 h-5 text-amber-500" />
+                  </div>
+                  Pending Requests ({dashboardData?.pendingRequests?.length || 0})
                 </h2>
                 {dashboardData?.pendingRequests && dashboardData.pendingRequests.length > 0 ? (
                   <div className="space-y-4">
                     {dashboardData.pendingRequests.map((req: any) => (
-                      <div key={req.id} className="p-5 bg-amber-50/30 rounded-2xl border border-amber-100/50 hover:bg-amber-50/50 transition">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                          <div>
-                            <p className="font-bold text-slate-800 text-lg">{req.patientName || 'New Patient'}</p>
-                            <p className="text-slate-600 flex items-center gap-1.5 mt-1 font-medium">
-                              <Calendar className="w-4 h-4 text-amber-600" />
-                              Requested: {new Date(req.scheduledTime).toLocaleString()}
-                            </p>
-                            <p className="text-xs text-slate-400 mt-1 uppercase font-bold tracking-widest">{req.type} CONSULTATION</p>
+                      <div key={req.id} className="p-6 bg-amber-50/40 rounded-3xl border border-amber-100/50 hover:bg-amber-50/60 transition-all group">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+                          <div className="flex items-center gap-4">
+                            <div className="w-14 h-14 bg-gradient-to-br from-amber-100 to-orange-100 rounded-2xl flex items-center justify-center text-amber-700 font-black text-xl group-hover:scale-110 transition-transform duration-500 shadow-sm">
+                              {req.patientName?.charAt(0) || 'P'}
+                            </div>
+                            <div>
+                              <p className="font-black text-slate-800 text-lg leading-tight">{req.patientName || 'New Patient'}</p>
+                              <div className="flex flex-wrap items-center gap-3 mt-2">
+                                <span className="text-slate-500 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider bg-white/50 px-2 py-1 rounded-lg">
+                                  <Calendar className="w-3.5 h-3.5 text-amber-600" />
+                                  {new Date(req.scheduledTime).toLocaleDateString()}
+                                </span>
+                                <span className="text-slate-500 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider bg-white/50 px-2 py-1 rounded-lg">
+                                  <Clock className="w-3.5 h-3.5 text-amber-600" />
+                                  {new Date(req.scheduledTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              </div>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-3">
                             <button
                               onClick={() => handleConfirmAppointment(req.id)}
                               disabled={actionLoading === req.id}
-                              className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-sm font-bold hover:bg-emerald-700 transition flex items-center gap-2 shadow-lg shadow-emerald-600/20"
+                              className="px-6 py-3 bg-emerald-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-xl shadow-emerald-600/20 active:scale-95 disabled:opacity-50"
                             >
                               {actionLoading === req.id ? <Loader className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
                               Confirm
@@ -394,7 +462,7 @@ export default function DoctorDashboard() {
                             <button
                               onClick={() => handleCancelAppointment(req.id)}
                               disabled={actionLoading === req.id}
-                              className="px-4 py-2 bg-white text-slate-600 border border-slate-200 rounded-xl text-sm font-bold hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition flex items-center gap-2 shadow-sm"
+                              className="px-6 py-3 bg-white/80 text-slate-600 border border-slate-200 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-all flex items-center gap-2 shadow-sm active:scale-95 disabled:opacity-50"
                             >
                               <XCircle className="w-4 h-4" />
                               Decline
@@ -405,8 +473,11 @@ export default function DoctorDashboard() {
                     ))}
                   </div>
                 ) : (
-                  <div className="text-center py-12 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
-                    <p className="text-slate-400 font-medium">No pending requests</p>
+                  <div className="text-center py-16 bg-slate-50/30 rounded-3xl border border-dashed border-slate-200">
+                    <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <CheckCircle className="w-8 h-8 text-slate-300" />
+                    </div>
+                    <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">No pending requests</p>
                   </div>
                 )}
               </div>
@@ -415,37 +486,44 @@ export default function DoctorDashboard() {
             {/* Sidebar Column */}
             <div className="space-y-6">
               {/* Account Status Card */}
-              <div className="glass-card p-6 border-white/40 shadow-lg relative overflow-hidden group">
-                <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:scale-110 transition-transform">
-                  <ShieldCheck size={80} className={dashboardData?.doctor?.user_id?.is_active ? 'text-emerald-500' : 'text-slate-400'} />
+              <motion.div
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                className="glass-card p-8 border-white/40 shadow-xl relative overflow-hidden group"
+              >
+                <div className="absolute -top-4 -right-4 p-8 opacity-5 group-hover:scale-110 group-hover:opacity-10 transition-all duration-700 rotate-12">
+                  <ShieldCheck size={120} className={dashboardData?.doctor?.user_id?.is_active ? 'text-emerald-500' : 'text-slate-400'} />
                 </div>
                 <div className="relative z-10">
-                  <div className="flex items-center gap-2 mb-4">
-                    <div className={`w-2 h-2 rounded-full ${dashboardData?.doctor?.user_id?.is_active ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`}></div>
-                    <h2 className="text-lg font-black text-slate-800 uppercase tracking-tight">Account Status</h2>
+                  <div className="flex items-center gap-3 mb-8">
+                    <div className={`w-3 h-3 rounded-full ${dashboardData?.doctor?.user_id?.is_active ? 'bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.5)] animate-pulse' : 'bg-slate-400'}`}></div>
+                    <h2 className="text-lg font-black text-slate-800 uppercase tracking-tighter">Account Visibility</h2>
                   </div>
 
-                  <div className="mb-6">
-                    <span className={`px-4 py-1.5 rounded-2xl text-xs font-black uppercase tracking-widest ${dashboardData?.doctor?.user_id?.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
-                      {dashboardData?.doctor?.user_id?.is_active ? 'Active' : 'Inactive'}
-                    </span>
-                    <p className="text-slate-500 text-xs mt-3 font-medium leading-relaxed">
+                  <div className="mb-8">
+                    <div className="flex items-center gap-3">
+                      <span className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-sm ${dashboardData?.doctor?.user_id?.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                        {dashboardData?.doctor?.user_id?.is_active ? 'Online' : 'Offline'}
+                      </span>
+                    </div>
+                    <p className="text-slate-500 text-xs mt-4 font-bold leading-relaxed uppercase tracking-wide opacity-80">
                       {dashboardData?.doctor?.user_id?.is_active
-                        ? 'Your profile is visible to patients. You can receive new appointment requests.'
-                        : 'Your profile is currently hidden. You won\'t receive new appointment requests.'}
+                        ? 'Your profile is visible to patients for appointment booking.'
+                        : 'Your profile is currently hidden from patients.'}
                     </p>
                   </div>
 
-                  <div className="space-y-3">
+                  <div className="space-y-4">
                     {dashboardData?.doctor?.status_change_request?.status === 'PENDING' ? (
-                      <div className="p-3 bg-amber-50 border border-amber-100 rounded-xl">
-                        <p className="text-[10px] font-black uppercase text-amber-700 tracking-widest mb-1 flex items-center gap-1">
-                          <Clock size={10} /> Pending Request
+                      <div className="p-5 bg-amber-50/50 border border-amber-100 rounded-3xl backdrop-blur-sm">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Clock size={14} className="text-amber-600 animate-spin-slow" />
+                          <p className="text-xs font-black uppercase text-amber-700 tracking-widest">Awaiting Admin</p>
+                        </div>
+                        <p className="text-sm text-slate-800 font-bold">
+                          {dashboardData.doctor.status_change_request.type} requested
                         </p>
-                        <p className="text-xs text-amber-900 font-bold">
-                          {dashboardData.doctor.status_change_request.type} Requested
-                        </p>
-                        <p className="text-[10px] text-amber-600 mt-1 line-clamp-2 italic">
+                        <p className="text-xs text-amber-600 mt-2 italic line-clamp-2">
                           "{dashboardData.doctor.status_change_request.reason}"
                         </p>
                       </div>
@@ -455,42 +533,52 @@ export default function DoctorDashboard() {
                           setStatusRequestType(dashboardData?.doctor?.user_id?.is_active ? 'DEACTIVATE' : 'ACTIVATE');
                           setShowStatusModal(true);
                         }}
-                        className={`w-full py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-all shadow-sm flex items-center justify-center gap-2 ${dashboardData?.doctor?.user_id?.is_active
-                          ? 'bg-slate-200 text-slate-700 hover:bg-slate-800 hover:text-white'
-                          : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                        className={`w-full py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-xl active:scale-[0.98] flex items-center justify-center gap-3 ${dashboardData?.doctor?.user_id?.is_active
+                          ? 'bg-slate-900 text-white hover:bg-black shadow-slate-900/10'
+                          : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-600/10'
                           }`}
                       >
                         <Power size={14} />
                         Request {dashboardData?.doctor?.user_id?.is_active ? 'Deactivation' : 'Activation'}
                       </button>
                     )}
-                    <p className="text-[10px] text-slate-400 text-center font-bold tracking-widest uppercase">Admin approval required</p>
+                    <p className="text-[9px] text-slate-400 text-center font-black tracking-[0.2em] uppercase">Security verified</p>
                   </div>
                 </div>
-              </div>
+              </motion.div>
 
-              {/* Critical Alerts */}
-              <div className="glass-card p-6 border-white/40" data-alerts-section>
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                    <AlertTriangle className="w-5 h-5 text-red-600" />
+              {/* Patient Alerts */}
+              <motion.div
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                className="glass-card p-8 border-white/40"
+                data-alerts-section
+              >
+                <div className="flex items-center justify-between mb-8">
+                  <h2 className="text-lg font-black text-slate-800 flex items-center gap-3 tracking-tighter uppercase">
+                    <div className="p-2 bg-red-100 rounded-xl">
+                      <AlertTriangle className="w-5 h-5 text-red-600" />
+                    </div>
                     Patient Alerts
                   </h2>
-                  <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded text-[10px] font-black uppercase tracking-tighter">Live</span>
+                  <span className="flex items-center gap-1 px-3 py-1 bg-red-50 text-red-600 rounded-full text-[9px] font-black uppercase tracking-widest border border-red-100">
+                    <div className="w-1.5 h-1.5 bg-red-600 rounded-full animate-pulse shadow-[0_0_8px_rgba(220,38,38,0.5)]"></div>
+                    Live
+                  </span>
                 </div>
                 {dashboardData?.alerts && dashboardData.alerts.length > 0 ? (
                   <div className="space-y-4">
                     {dashboardData.alerts.map((alert: any) => (
-                      <div 
-                        key={alert.id} 
-                        className="p-4 bg-red-50/50 rounded-2xl border border-red-100 group hover:bg-red-50 transition duration-300"
+                      <div
+                        key={alert.id}
+                        className="p-5 bg-red-50/40 rounded-3xl border border-red-100/50 group hover:bg-red-50/60 transition-all duration-300"
                       >
-                        <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start justify-between gap-4">
                           <div className="flex-1 cursor-pointer" onClick={() => setSelectedAlert(alert)}>
-                            <p className="text-sm font-bold text-red-900 group-hover:translate-x-1 transition-transform">{alert.title || alert.message}</p>
-                            <div className="flex items-center justify-between mt-3">
-                              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{alert.patientName}</span>
-                              <span className="text-[10px] font-medium text-slate-400">{new Date(alert.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                            <p className="text-sm font-black text-red-900 group-hover:translate-x-1 transition-transform leading-tight">{alert.title || alert.message}</p>
+                            <div className="flex items-center justify-between mt-4">
+                              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest bg-white/60 px-2 py-0.5 rounded-lg">{alert.patientName}</span>
+                              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">{new Date(alert.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                             </div>
                           </div>
                           <div className="flex items-center gap-2 flex-shrink-0">
@@ -501,7 +589,7 @@ export default function DoctorDashboard() {
                                   downloadMedicalRecord(alert.patientId, alert.patientName);
                                 }}
                                 disabled={downloadingPatientId === alert.patientId}
-                                className="p-2 bg-white text-emerald-700 border border-emerald-200 rounded-xl hover:bg-emerald-50 transition-colors flex items-center gap-1 text-xs font-semibold disabled:opacity-60"
+                                className="p-3 bg-white/80 text-emerald-700 border border-emerald-100 rounded-2xl hover:bg-emerald-600 hover:text-white hover:border-emerald-600 transition-all shadow-sm disabled:opacity-50 active:scale-90"
                                 title="Download medical record"
                               >
                                 {downloadingPatientId === alert.patientId ? (
@@ -514,7 +602,7 @@ export default function DoctorDashboard() {
                             {alert.patientId && (
                               <Link
                                 href={`/doctor/chat/${alert.patientId}`}
-                                className="p-2 bg-blue-100 text-blue-600 rounded-xl hover:bg-blue-200 transition-colors flex-shrink-0"
+                                className="p-3 bg-blue-600 text-white rounded-2xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20 active:scale-90"
                                 title="Chat with patient"
                               >
                                 <MessageCircle className="w-4 h-4" />
@@ -526,16 +614,16 @@ export default function DoctorDashboard() {
                     ))}
                   </div>
                 ) : (
-                  <div className="text-center py-8">
-                    <div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                      <CheckCircle className="w-6 h-6 text-emerald-600" />
+                  <div className="text-center py-12 bg-slate-50/30 rounded-3xl border border-dashed border-slate-200">
+                    <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <CheckCircle className="w-8 h-8 text-emerald-300" />
                     </div>
-                    <p className="text-slate-500 text-sm font-medium">All patients are stable</p>
+                    <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">All patients stable</p>
                   </div>
                 )}
-              </div>
+              </motion.div>
 
-             
+
             </div>
           </div>
         </div>
@@ -628,11 +716,11 @@ export default function DoctorDashboard() {
               <div className="p-6 space-y-6">
                 {selectedAlert && (() => {
                   const lines = (selectedAlert.message || '').split('\n').filter((l: string) => l.trim());
-                  
+
                   let issuesText = '';
                   let recsText = '';
                   let snapshotText = '';
-                  
+
                   for (const line of lines) {
                     if (line.toUpperCase().includes('ISSUES:')) {
                       issuesText = line.split(/issues:/i)[1] || '';
@@ -642,7 +730,7 @@ export default function DoctorDashboard() {
                       snapshotText = line.split(/snapshot:/i)[1] || '';
                     }
                   }
-                  
+
                   const issues = issuesText.split(';').map((i: string) => i.trim()).filter((i: string) => i.length > 0);
                   const recs = recsText.split('|').map((r: string) => r.trim()).filter((r: string) => r.length > 0);
 
@@ -655,7 +743,7 @@ export default function DoctorDashboard() {
                             <CheckCircle className="w-6 h-6 text-emerald-600" />
                             <h4 className="text-xl font-bold text-emerald-800">Alert Resolved</h4>
                           </div>
-                          
+
                           {selectedAlert?.instructions && (
                             <div className="bg-emerald-50 p-6 rounded-2xl border-2 border-emerald-200">
                               <div className="flex items-center gap-2 mb-3">

@@ -227,8 +227,18 @@ class ApiClient {
     return response.data;
   }
 
-  async getPatientAppointments(): Promise<ApiResponse<any[]>> {
-    const response = await this.client.get('/patient/appointments');
+  async getPatientAppointments(page: number = 0, size: number = 10, status?: string): Promise<ApiResponse<any>> {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      size: size.toString(),
+      ...(status && { status }),
+    });
+    const response = await this.client.get(`/patient/appointments?${params}`);
+    return response.data;
+  }
+
+  async getAvailableSlots(doctorId: string, date: string): Promise<ApiResponse<any[]>> {
+    const response = await this.client.get(`/patient/appointments/slots?doctorId=${doctorId}&date=${date}`);
     return response.data;
   }
 
@@ -237,8 +247,33 @@ class ApiClient {
     return response.data;
   }
 
-  async cancelPatientAppointment(appointmentId: string): Promise<ApiResponse<void>> {
-    const response = await this.client.post(`/patient/appointments/${appointmentId}/cancel`);
+  async cancelPatientAppointment(appointmentId: string, reason: string): Promise<ApiResponse<any>> {
+    const response = await this.client.post(`/patient/appointments/${appointmentId}/cancel`, { reason });
+    return response.data;
+  }
+
+  async requestEmergencyCancellation(appointmentId: string, reason: string): Promise<ApiResponse<any>> {
+    const response = await this.client.post(`/patient/appointments/${appointmentId}/emergency-cancel`, { reason });
+    return response.data;
+  }
+
+  async processAppointmentPayment(appointmentId: string): Promise<ApiResponse<any>> {
+    const response = await this.client.post(`/patient/appointments/${appointmentId}/pay`);
+    return response.data;
+  }
+
+  async createStripeCheckout(appointmentId: string): Promise<ApiResponse<{ sessionId: string; url: string }>> {
+    const response = await this.client.post(`/patient/appointments/${appointmentId}/checkout`);
+    return response.data;
+  }
+
+  async verifyStripePayment(sessionId: string): Promise<ApiResponse<any>> {
+    const response = await this.client.get(`/patient/appointments/verify-payment?sessionId=${sessionId}`);
+    return response.data;
+  }
+
+  async getAppointmentDetails(appointmentId: string): Promise<ApiResponse<any>> {
+    const response = await this.client.get(`/patient/appointments/${appointmentId}`);
     return response.data;
   }
 
@@ -263,32 +298,64 @@ class ApiClient {
     return response.data;
   }
 
-  async getAppointmentRequests(): Promise<ApiResponse<any>> {
-    const response = await this.client.get('/doctor/appointments/requests');
-    return response.data;
-  }
-
-  async getUpcomingAppointments(): Promise<ApiResponse<any>> {
-    const response = await this.client.get('/doctor/appointments/upcoming');
-    return response.data;
-  }
-
-  async confirmAppointment(appointmentId: string): Promise<ApiResponse<any>> {
-    const response = await this.client.post(`/doctor/appointments/${appointmentId}/confirm`);
-    return response.data;
-  }
-
-  async rescheduleAppointment(appointmentId: string, newDateTime: string): Promise<ApiResponse<any>> {
-    const response = await this.client.put(`/doctor/appointments/${appointmentId}/reschedule`, {
-      newDateTime,
+  async getAppointmentRequests(page: number = 0, size: number = 10): Promise<ApiResponse<any>> {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      size: size.toString(),
     });
+    const response = await this.client.get(`/doctor/appointments/requests?${params}`);
     return response.data;
   }
 
-  async cancelAppointment(appointmentId: string, reason?: string): Promise<ApiResponse<any>> {
-    const response = await this.client.post(`/doctor/appointments/${appointmentId}/cancel`, {
-      reason,
+  async getDoctorAppointments(status?: string, date?: string, page: number = 0, size: number = 10): Promise<ApiResponse<any>> {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      size: size.toString(),
+      ...(status && { status }),
+      ...(date && { date }),
     });
+    const response = await this.client.get(`/doctor/appointments?${params.toString()}`);
+    return response.data;
+  }
+
+  async getDoctorDailySchedule(date?: string): Promise<ApiResponse<any>> {
+    const url = date ? `/doctor/appointments/today?date=${date}` : '/doctor/appointments/today';
+    const response = await this.client.get(url);
+    return response.data;
+  }
+
+  async getDoctorNextDaySchedule(): Promise<ApiResponse<any>> {
+    const response = await this.client.get('/doctor/appointments/tomorrow');
+    return response.data;
+  }
+
+  async confirmAppointment(appointmentId: string, meetingLink?: string): Promise<ApiResponse<any>> {
+    const response = await this.client.post(`/doctor/appointments/${appointmentId}/confirm`, { meetingLink });
+    return response.data;
+  }
+
+  async cancelDoctorAppointment(appointmentId: string, reason: string): Promise<ApiResponse<any>> {
+    const response = await this.client.post(`/doctor/appointments/${appointmentId}/cancel`, { reason });
+    return response.data;
+  }
+
+  async cancelAppointment(appointmentId: string, reason: string = 'Cancelled by doctor'): Promise<ApiResponse<any>> {
+    const response = await this.client.post(`/doctor/appointments/${appointmentId}/cancel`, { reason });
+    return response.data;
+  }
+
+  async rescheduleAppointment(appointmentId: string, dateTime: string): Promise<ApiResponse<any>> {
+    const response = await this.client.post(`/doctor/appointments/${appointmentId}/reschedule`, { dateTime });
+    return response.data;
+  }
+
+  async completeAppointment(appointmentId: string, prescription: string, instructions: string): Promise<ApiResponse<any>> {
+    const response = await this.client.post(`/doctor/appointments/${appointmentId}/complete`, { prescription, instructions });
+    return response.data;
+  }
+
+  async markNoShow(appointmentId: string): Promise<ApiResponse<any>> {
+    const response = await this.client.post(`/doctor/appointments/${appointmentId}/no-show`);
     return response.data;
   }
 
@@ -307,7 +374,7 @@ class ApiClient {
     if (page !== undefined) params.append('page', page.toString());
     if (size !== undefined) params.append('size', size.toString());
     if (status) params.append('status', status);
-    
+
     const response = await this.client.get(`/doctor/alerts?${params.toString()}`);
     return response.data;
   }
@@ -449,6 +516,16 @@ class ApiClient {
     return response.data;
   }
 
+  async getEmergencyCancellations(): Promise<ApiResponse<any[]>> {
+    const response = await this.client.get('/admin/emergency-cancellations');
+    return response.data;
+  }
+
+  async reviewEmergencyCancellation(requestId: string, approved: boolean, notes: string): Promise<ApiResponse<any>> {
+    const response = await this.client.post(`/admin/emergency-cancellations/${requestId}/review`, { approved, notes });
+    return response.data;
+  }
+
   // Chat (Doctor)
   async getDoctorChatHistory(patientId: string): Promise<ApiResponse<any[]>> {
     const response = await this.client.get(`/chat/doctor/${patientId}/history`);
@@ -473,15 +550,15 @@ class ApiClient {
     if (filters?.action) query += `&action=${filters.action}`;
     if (filters?.entityType) query += `&entityType=${filters.entityType}`;
     if (filters?.status) query += `&status=${filters.status}`;
-    
+
     const response = await this.client.get(`/logs/${query}`);
     return response.data;
   }
 
-    async getUserActivityLogs(userId: string, page: number = 0, size: number = 50): Promise<ApiResponse<any>> {
-      const response = await this.client.get(`/logs/user/${userId}?page=${page}&size=${size}`);
-      return response.data;
-    }
+  async getUserActivityLogs(userId: string, page: number = 0, size: number = 50): Promise<ApiResponse<any>> {
+    const response = await this.client.get(`/logs/user/${userId}?page=${page}&size=${size}`);
+    return response.data;
+  }
 
   async createPatientAlert(data: any): Promise<ApiResponse<any>> {
     const response = await this.client.post('/patient/alert/create', data);

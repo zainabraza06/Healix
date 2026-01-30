@@ -8,7 +8,7 @@ import { motion } from 'framer-motion';
 
 // Dynamically import Scene to avoid SSR issues with Canvas (often safer with R3F)
 const Scene = dynamic(() => import('@/components/canvas/Scene'), { ssr: false });
-const FloatingIcons = dynamic(() => import('@/components/canvas/FloatingIcons').then(mod => mod.FloatingIcons), { ssr: false });
+const FloatingIcons = dynamic(() => import('@/components/canvas/FloatingIcons'), { ssr: false });
 
 export default function Home() {
   const router = useRouter();

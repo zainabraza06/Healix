@@ -34,6 +34,10 @@ import {
   disablePatientController,
   enablePatientController,
 } from '../controllers/patientController.js';
+import {
+  getPendingEmergencyCancellationsController,
+  reviewEmergencyCancellationController,
+} from '../controllers/appointmentController.js';
 import { getAllDoctorsController, getDoctorByIdController } from '../services/doctorService.js';
 import { registerAdminController } from '../controllers/authController.js';
 import { validate } from '../middleware/validator.js';
@@ -58,8 +62,8 @@ router.get('/dashboard/appointment-stats', getAppointmentStatsController);
 
 // Paginated data endpoints
 router.get('/patients', getPaginatedPatientsController);
-router.get('/patients/download', downloadPatientsController); // Added downloadPatientsController route
-router.get('/patients/:patientId', getPatientByIdController); // Moved from Patient management endpoints
+router.get('/patients/download', downloadPatientsController);
+router.get('/patients/:patientId', getPatientByIdController);
 router.get('/doctors', getPaginatedDoctorsController);
 router.get('/doctors/download', downloadDoctorsController);
 router.get('/appointments', getPaginatedAppointmentsController);
@@ -88,4 +92,9 @@ router.post('/patients/manage-status', managePatientStatusController);
 router.post('/doctors/manage-status', manageDoctorStatusController);
 router.get('/doctors/:doctorId', getDoctorByIdController);
 
+// Emergency cancellation requests
+router.get('/emergency-cancellations', getPendingEmergencyCancellationsController);
+router.post('/emergency-cancellations/:id/review', reviewEmergencyCancellationController);
+
 export default router;
+

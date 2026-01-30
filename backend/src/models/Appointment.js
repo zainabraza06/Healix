@@ -12,14 +12,20 @@ const appointmentSchema = new mongoose.Schema(
       ref: 'Doctor',
       required: true,
     },
+    // Slot timing
     appointment_date: {
       type: Date,
       required: true,
     },
-    appointment_time: {
-      type: String,
+    slot_start_time: {
+      type: String, // Format: "09:00", "09:30", etc.
       required: true,
     },
+    slot_end_time: {
+      type: String, // Calculated: start + 30 min
+      required: true,
+    },
+    // Type and status
     appointment_type: {
       type: String,
       enum: ['ONLINE', 'OFFLINE'],
@@ -28,30 +34,88 @@ const appointmentSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['SCHEDULED', 'COMPLETED', 'CANCELLED', 'NO_SHOW'],
-      default: 'SCHEDULED',
+      enum: ['REQUESTED', 'CONFIRMED', 'COMPLETED', 'CANCELLED', 'NO_SHOW'],
+      default: 'REQUESTED',
     },
-    reason: String,
+    // Appointment details
+    reason: {
+      type: String,
+      required: true,
+    },
     notes: String,
+    // For online appointments
     meeting_link: {
       type: String,
-      required: function() {
-        return this.appointment_type === 'ONLINE';
-      }
     },
+    // For offline appointments
     location: {
       type: String,
-      required: function() {
-        return this.appointment_type === 'OFFLINE';
-      }
+      default: 'Healix Medical Center, Main Branch',
     },
+    // Payment fields
+    payment_status: {
+      type: String,
+      enum: ['PENDING', 'PAID', 'REFUNDED', 'PARTIAL_REFUND'],
+      default: 'PENDING',
+    },
+    payment_amount: {
+      type: Number,
+      default: 1000,
+    },
+    refund_amount: {
+      type: Number,
+      default: 0,
+    },
+    challan_number: {
+      type: String,
+    },
+    // Stripe payment fields
+    stripe_session_id: {
+      type: String,
+    },
+    stripe_payment_id: {
+      type: String,
+    },
+    paid_at: {
+      type: Date,
+    },
+    // Completion fields (filled by doctor)
+    prescription: {
+      type: String,
+    },
+    instructions: {
+      type: String,
+    },
+    completed_at: {
+      type: Date,
+    },
+    patient_attended: {
+      type: Boolean,
+      default: true,
+    },
+    // Cancellation fields
     cancelled_by: {
       type: String,
       enum: ['PATIENT', 'DOCTOR', 'ADMIN'],
     },
-    cancellation_reason: String,
+    cancellation_reason: {
+      type: String,
+    },
+    cancelled_at: {
+      type: Date,
+    },
+    // Chat eligibility - set to true after completion
+    chat_enabled: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } }
 );
+
+// Index for efficient queries
+appointmentSchema.index({ doctor_id: 1, appointment_date: 1, status: 1 });
+appointmentSchema.index({ patient_id: 1, status: 1 });
+appointmentSchema.index({ status: 1, appointment_date: 1 });
 
 export default mongoose.model('Appointment', appointmentSchema);
