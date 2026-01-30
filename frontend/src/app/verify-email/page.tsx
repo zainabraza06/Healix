@@ -9,7 +9,7 @@ import { CheckCircle, XCircle, Loader, Mail } from 'lucide-react';
 import Link from 'next/link';
 
 const Scene = dynamic(() => import('@/components/canvas/Scene'), { ssr: false });
-const FloatingIcons = dynamic(() => import('@/components/canvas/FloatingIcons').then(mod => mod.FloatingIcons), { ssr: false });
+const FloatingIcons = dynamic(() => import('@/components/canvas/FloatingIcons'), { ssr: false });
 
 export default function VerifyEmailPage() {
   const router = useRouter();

@@ -107,9 +107,15 @@ export interface Alert {
   patientId: string;
   doctorId: string;
   message: string;
+  title?: string;
   category: 'CRITICAL' | 'WARNING' | 'INFO';
+  severity?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
   timestamp: string;
   acknowledged: boolean;
+  patientName?: string;
+  instructions?: string;
+  prescription?: string;
+  status?: string;
 }
 
 export interface PatientDashboard {
@@ -149,11 +155,14 @@ export interface Appointment {
   id: string;
   patientId: string;
   doctorId: string;
+  patientName?: string;
   scheduledTime: string;
   status: 'PENDING' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED';
   type: 'IN_PERSON' | 'ONLINE' | 'PHONE';
   reason?: string;
   notes?: string;
+  appointmentDate?: string;
+  slotStartTime?: string;
 }
 
 export interface Prescription {
@@ -174,6 +183,7 @@ export interface DoctorDashboard {
   upcomingAppointments: Appointment[];
   pendingRequests: Appointment[];
   alerts: Alert[];
+  weeklyActivity?: { name: string; appointments: number }[];
   stats: {
     totalPatients: number;
     appointmentsToday: number;

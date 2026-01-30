@@ -14,7 +14,7 @@ import { PieChartWrapper, BarChartWrapper } from '@/components/charts/ChartWrapp
 
 // 3D Background
 const Scene = dynamic(() => import('@/components/canvas/Scene'), { ssr: false });
-const FloatingIcons = dynamic(() => import('@/components/canvas/FloatingIcons').then(mod => mod.FloatingIcons), { ssr: false });
+const FloatingIcons = dynamic(() => import('@/components/canvas/FloatingIcons'), { ssr: false });
 
 // Helper function to format status names
 const formatStatus = (status: string): string => {

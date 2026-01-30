@@ -37,7 +37,7 @@ function SphereShape(props: any) {
     )
 }
 
-export function FloatingIcons() {
+export default function FloatingIcons() {
     return (
         <group>
             <ambientLight intensity={0.5} />

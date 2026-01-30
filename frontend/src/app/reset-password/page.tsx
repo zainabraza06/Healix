@@ -9,7 +9,7 @@ import dynamic from 'next/dynamic';
 import { ArrowLeft, Loader, Lock, Eye, EyeOff } from 'lucide-react';
 
 const Scene = dynamic(() => import('@/components/canvas/Scene'), { ssr: false });
-const FloatingIcons = dynamic(() => import('@/components/canvas/FloatingIcons').then(mod => mod.FloatingIcons), { ssr: false });
+const FloatingIcons = dynamic(() => import('@/components/canvas/FloatingIcons'), { ssr: false });
 
 export default function ResetPasswordPage() {
   const router = useRouter();

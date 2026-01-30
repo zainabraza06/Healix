@@ -260,6 +260,31 @@ export const getDoctorDashboard = async (doctorId) => {
         .populate('patient_id', 'full_name email');
     });
 
+    // 5. Weekly Activity (last 7 days)
+    const weeklyActivity = [];
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    for (let i = 6; i >= 0; i--) {
+      const dayStart = new Date();
+      dayStart.setDate(dayStart.getDate() - i);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(dayStart);
+      dayEnd.setHours(23, 59, 59, 999);
+      
+      const count = await import('../models/Appointment.js').then(async (mod) => {
+        const Appointment = mod.default;
+        return await Appointment.countDocuments({
+          doctor_id: doctorId,
+          scheduled_time: { $gte: dayStart, $lte: dayEnd },
+          status: { $in: ['CONFIRMED', 'COMPLETED'] }
+        });
+      });
+      
+      weeklyActivity.push({
+        name: days[dayStart.getDay()],
+        appointments: count
+      });
+    }
+
     return {
       doctor,
       stats: {
@@ -293,7 +318,8 @@ export const getDoctorDashboard = async (doctorId) => {
         severity: alert.severity,
         status: alert.status,
         timestamp: alert.created_at
-      }))
+      })),
+      weeklyActivity
     };
   } catch (error) {
     throw new Error(`Failed to fetch doctor dashboard: ${error.message}`);

@@ -59,7 +59,7 @@ export const downloadPatientMedicalRecordController = async (req, res, next) => 
                 const appointment = await Appointment.findOne({
                     patient_id: patientId,
                     doctor_id: doctor._id,
-                    status: { $in: ['SCHEDULED', 'COMPLETED'] }
+                    status: { $in: ['CONFIRMED', 'COMPLETED'] }
                 });
                 if (appointment) {
                     hasAccess = true;

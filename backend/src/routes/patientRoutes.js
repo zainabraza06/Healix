@@ -15,6 +15,17 @@ import {
     getMedicalRecordsController,
     addMedicalRecordEntryController
 } from '../controllers/medicalRecordController.js';
+import {
+    getAvailableSlotsController,
+    requestAppointmentController,
+    getPatientAppointmentsController,
+    cancelPatientAppointmentController,
+    requestEmergencyCancellationController,
+    processPaymentController,
+    getAppointmentDetailsController,
+    createCheckoutSessionController,
+    verifyPaymentController,
+} from '../controllers/appointmentController.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 import multer from 'multer';
 
@@ -41,4 +52,16 @@ router.post('/alert/create', createPatientAlertController);
 router.get('/medical-records', getMedicalRecordsController);
 router.post('/medical-records/:type', addMedicalRecordEntryController);
 
+// Appointments
+router.get('/appointments', getPatientAppointmentsController);
+router.get('/appointments/slots', getAvailableSlotsController);
+router.get('/appointments/verify-payment', verifyPaymentController);
+router.post('/appointments/book', requestAppointmentController);
+router.post('/appointments/:id/cancel', cancelPatientAppointmentController);
+router.post('/appointments/:id/emergency-cancel', requestEmergencyCancellationController);
+router.post('/appointments/:id/checkout', createCheckoutSessionController);
+router.post('/appointments/:id/pay', processPaymentController);
+router.get('/appointments/:id', getAppointmentDetailsController);
+
 export default router;
+

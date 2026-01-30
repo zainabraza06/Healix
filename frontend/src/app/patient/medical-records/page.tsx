@@ -16,7 +16,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { MedicalRecord } from '@/types';
 
 const Scene = dynamic(() => import('@/components/canvas/Scene'), { ssr: false });
-const FloatingIcons = dynamic(() => import('@/components/canvas/FloatingIcons').then(mod => mod.FloatingIcons), { ssr: false });
+const FloatingIcons = dynamic(() => import('@/components/canvas/FloatingIcons'), { ssr: false });
 
 type TabType = 'overview' | 'immunizations' | 'allergies' | 'operations' | 'labResults' | 'history';
 

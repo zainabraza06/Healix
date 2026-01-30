@@ -14,7 +14,7 @@ import CreateAlertModal from "@/components/CreateAlertModal";
 
 // 3D Background
 const Scene = dynamic(() => import('@/components/canvas/Scene'), { ssr: false });
-const FloatingIcons = dynamic(() => import('@/components/canvas/FloatingIcons').then(mod => mod.FloatingIcons), { ssr: false });
+const FloatingIcons = dynamic(() => import('@/components/canvas/FloatingIcons'), { ssr: false });
 
 export default function AllAlertsPage() {
   const { user } = useAuthStore();
