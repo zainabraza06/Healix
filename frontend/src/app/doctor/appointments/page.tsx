@@ -795,25 +795,68 @@ export default function DoctorAppointmentsPage() {
                               </div>
                             </div>
                             <div className="flex gap-3 w-full md:w-auto">
-                              <button
-                                onClick={() => {
-                                  setSelectedAppointment(req);
-                                  setDeclineReason('');
-                                  setShowDeclineModal(true);
-                                }}
-                                className="flex-1 md:flex-none px-8 py-3.5 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-700 shadow-xl shadow-red-600/20 transition-all active:scale-[0.98]"
-                              >
-                                Reject
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setSelectedAppointment(req);
-                                  setShowRescheduleForm(true);
-                                }}
-                                className="flex-1 md:flex-none px-8 py-3.5 bg-cyan-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-cyan-700 shadow-xl shadow-cyan-600/20 transition-all active:scale-[0.98]"
-                              >
-                                Approve
-                              </button>
+                              {/* If patient has proposed a new time (rescheduleRequestedBy === 'PATIENT'), only allow Approve or Reschedule (no Reject/Cancel) */}
+                              {((req.rescheduleStatus === 'PENDING' || !req.rescheduleStatus) && req.rescheduleRequestedBy === 'PATIENT') ? (
+                                <>
+                                  <button
+                                    onClick={async () => {
+                                      setIsSubmitting(true);
+                                      try {
+                                        const response = await apiClient.confirmAppointment(req.id);
+                                        if (response.success) {
+                                          toast.success('Reschedule approved!');
+                                          fetchData();
+                                        } else {
+                                          toast.error(response.message || 'Failed to approve reschedule');
+                                        }
+                                      } catch (err) {
+                                        toast.error('An error occurred');
+                                      } finally {
+                                        setIsSubmitting(false);
+                                      }
+                                    }}
+                                    disabled={isSubmitting}
+                                    className="flex-1 md:flex-none px-8 py-3.5 bg-cyan-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-cyan-700 shadow-xl shadow-cyan-600/20 transition-all active:scale-[0.98]"
+                                  >
+                                    {isSubmitting ? 'Approving...' : 'Approve'}
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setSelectedAppointment(req);
+                                      setShowRescheduleForm(true);
+                                    }}
+                                    className="flex-1 md:flex-none px-8 py-3.5 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-black shadow-xl shadow-slate-900/20 transition-all active:scale-[0.98]"
+                                  >
+                                    Reschedule
+                                  </button>
+                                </>
+                              ) : (req.rescheduleStatus === 'PENDING' || !req.rescheduleStatus) ? (
+                                <>
+                                  <button
+                                    onClick={() => {
+                                      setSelectedAppointment(req);
+                                      setDeclineReason('');
+                                      setShowDeclineModal(true);
+                                    }}
+                                    className="flex-1 md:flex-none px-8 py-3.5 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-700 shadow-xl shadow-red-600/20 transition-all active:scale-[0.98]"
+                                  >
+                                    Reject
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setSelectedAppointment(req);
+                                      setShowRescheduleForm(true);
+                                    }}
+                                    className="flex-1 md:flex-none px-8 py-3.5 bg-cyan-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-cyan-700 shadow-xl shadow-cyan-600/20 transition-all active:scale-[0.98]"
+                                  >
+                                    Approve
+                                  </button>
+                                </>
+                              ) : req.rescheduleStatus === 'APPROVED' ? (
+                                <span className="px-6 py-3.5 bg-emerald-100 text-emerald-700 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center">Reschedule Approved</span>
+                              ) : req.rescheduleStatus === 'REJECTED' ? (
+                                <span className="px-6 py-3.5 bg-red-100 text-red-700 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center">Reschedule Rejected</span>
+                              ) : null}
                             </div>
                           </div>
                         </motion.div>

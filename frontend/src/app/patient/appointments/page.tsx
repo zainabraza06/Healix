@@ -27,20 +27,12 @@ interface Appointment {
   status: 'REQUESTED' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW' | 'RESCHEDULE_REQUESTED';
   reason: string;
   meetingLink?: string;
-  location?: string;
-  paymentStatus: 'PENDING' | 'PAID' | 'REFUNDED' | 'PARTIAL_REFUND';
-  paymentAmount: number;
-  refundAmount?: number;
-  challanNumber?: string;
-  prescription?: string;
-  instructions?: string;
-  cancelledBy?: string;
+  paymentStatus?: 'PENDING' | 'PAID' | 'REFUNDED';
   cancellationReason?: string;
-  rescheduleReason?: string;
-  rescheduleRequestedBy?: 'PATIENT' | 'DOCTOR';
   doctorCancelledRescheduleRequest?: boolean;
   doctorCancellationReason?: string;
-  chatEnabled?: boolean;
+  rescheduleRequestedBy?: 'PATIENT' | 'DOCTOR';
+  rescheduleReason?: string;
 }
 
 interface Doctor {
@@ -51,30 +43,29 @@ interface Doctor {
 
 interface Slot {
   time: string;
-  endTime: string;
   available: boolean;
 }
 
 export default function AppointmentsPage() {
-  const { } = useAuthStore();
-  const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [doctors, setDoctors] = useState<Doctor[]>([]);
-  const [activeTab, setActiveTab] = useState<'confirmed' | 'requested' | 'cancelled' | 'rescheduling'>('confirmed');
+  const { user } = useAuthStore();
 
-  // Pagination state
+  // State for appointments
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('confirmed');
   const [currentPage, setCurrentPage] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const pageSize = 10;
 
-  // Booking form state
+  // State for booking new appointment
   const [showBookForm, setShowBookForm] = useState(false);
   const [selectedDoctor, setSelectedDoctor] = useState('');
   const [selectedDate, setSelectedDate] = useState('');
-  const [availableSlots, setAvailableSlots] = useState<Slot[]>([]);
   const [selectedSlot, setSelectedSlot] = useState('');
   const [appointmentType, setAppointmentType] = useState<'ONLINE' | 'OFFLINE'>('OFFLINE');
   const [reason, setReason] = useState('');
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [availableSlots, setAvailableSlots] = useState<Slot[]>([]);
   const [isLoadingSlots, setIsLoadingSlots] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -609,6 +600,100 @@ export default function AppointmentsPage() {
     setAvailableSlots([]);
   };
 
+  // Helper function to render slot selection content
+  const renderSlotSelectionContent = () => {
+    if (typeof window === 'undefined' || !selectedDoctor || !selectedDate) {
+      return null;
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const selectedDateObj = new Date(selectedDate);
+    selectedDateObj.setHours(0, 0, 0, 0);
+
+    const minDate = new Date(today);
+    minDate.setDate(today.getDate() + 3);
+    const maxDate = new Date(today);
+    maxDate.setDate(today.getDate() + 30);
+
+    const dayOfWeek = selectedDateObj.getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      return (
+        <p className="text-red-500 text-[10px] font-black uppercase tracking-[0.2em]">
+          Not available on weekends
+        </p>
+      );
+    }
+
+    if (selectedDateObj < minDate || selectedDateObj > maxDate) {
+      return (
+        <p className="text-amber-600 text-[10px] font-black uppercase tracking-[0.2em]">
+          Please select a date between {new Date(minBookingDate).toLocaleDateString()} and {new Date(maxBookingDate).toLocaleDateString()}
+        </p>
+      );
+    }
+
+    if (isLoadingSlots) {
+      return (
+        <div className="flex items-center gap-3 text-emerald-600 font-bold text-xs uppercase tracking-widest">
+          <Spinner size="sm" /> Loading Slots...
+        </div>
+      );
+    }
+
+    if (availableSlots.length === 0) {
+      return (
+        <p className="text-red-500 text-[10px] font-black uppercase tracking-[0.2em]">
+          No slots available for this date
+        </p>
+      );
+    }
+
+    return (
+      <div className="grid grid-cols-3 gap-2">
+        {availableSlots.map((slot) => (
+          <button
+            key={slot.time}
+            type="button"
+            onClick={() => setSelectedSlot(slot.time)}
+            className={`py-3 px-2 rounded-xl text-[10px] font-black uppercase tracking-tighter transition-all ${
+              selectedSlot === slot.time
+                ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20'
+                : 'bg-white/40 border border-white/60 text-slate-600 hover:bg-white/60'
+            }`}
+          >
+            {slot.time}
+          </button>
+        ))}
+      </div>
+    );
+  };
+
+  // Filter appointments based on active tab
+  const getFilteredAppointments = () => {
+    let filtered = appointments;
+    
+    if (activeTab === 'doctorRequests') {
+      filtered = appointments.filter(
+        (apt) => apt.status === 'RESCHEDULE_REQUESTED' && apt.rescheduleRequestedBy === 'DOCTOR'
+      );
+    } else if (activeTab === 'rescheduling') {
+      filtered = appointments.filter(
+        (apt) => apt.status === 'RESCHEDULE_REQUESTED' && apt.rescheduleRequestedBy === 'PATIENT'
+      );
+    } else if (activeTab === 'requested') {
+      filtered = appointments.filter((apt) => apt.status === 'REQUESTED');
+    } else if (activeTab === 'confirmed') {
+      filtered = appointments.filter((apt) => apt.status === 'CONFIRMED');
+    } else if (activeTab === 'cancelled') {
+      filtered = appointments.filter((apt) => apt.status === 'CANCELLED');
+    }
+    
+    return filtered;
+  };
+
+  const filteredAppointments = getFilteredAppointments();
+
   return (
     <ProtectedLayout allowedRoles={['PATIENT']}>
       <div className="relative min-h-screen">
@@ -669,10 +754,11 @@ export default function AppointmentsPage() {
                           <button
                             type="button"
                             onClick={() => setAppointmentType('OFFLINE')}
-                            className={`flex-1 py-4 px-6 rounded-2xl border transition-all flex items-center justify-center gap-3 font-bold text-xs uppercase tracking-widest ${appointmentType === 'OFFLINE'
-                              ? 'bg-slate-900 text-white border-slate-900 shadow-xl shadow-slate-900/10'
-                              : 'bg-white/40 text-slate-600 border-white/60 hover:bg-white/60'
-                              }`}
+                            className={`flex-1 py-4 px-6 rounded-2xl border transition-all flex items-center justify-center gap-3 font-bold text-xs uppercase tracking-widest ${
+                              appointmentType === 'OFFLINE'
+                                ? 'bg-slate-900 text-white border-slate-900 shadow-xl shadow-slate-900/10'
+                                : 'bg-white/40 text-slate-600 border-white/60 hover:bg-white/60'
+                            }`}
                           >
                             <MapPin size={16} />
                             In-Person
@@ -680,10 +766,11 @@ export default function AppointmentsPage() {
                           <button
                             type="button"
                             onClick={() => setAppointmentType('ONLINE')}
-                            className={`flex-1 py-4 px-6 rounded-2xl border transition-all flex items-center justify-center gap-3 font-bold text-xs uppercase tracking-widest ${appointmentType === 'ONLINE'
-                              ? 'bg-emerald-600 text-white border-emerald-600 shadow-xl shadow-emerald-600/10'
-                              : 'bg-white/40 text-slate-600 border-white/60 hover:bg-white/60'
-                              }`}
+                            className={`flex-1 py-4 px-6 rounded-2xl border transition-all flex items-center justify-center gap-3 font-bold text-xs uppercase tracking-widest ${
+                              appointmentType === 'ONLINE'
+                                ? 'bg-emerald-600 text-white border-emerald-600 shadow-xl shadow-emerald-600/10'
+                                : 'bg-white/40 text-slate-600 border-white/60 hover:bg-white/60'
+                            }`}
                           >
                             <Video size={16} />
                             Video Call
@@ -728,7 +815,9 @@ export default function AppointmentsPage() {
                           </div>
                         )}
                         {!selectedDate || (new Date(selectedDate).getDay() !== 0 && new Date(selectedDate).getDay() !== 6) ? (
-                          <p className="mt-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Available from {new Date(minBookingDate).toLocaleDateString()} onwards (Mon-Fri)</p>
+                          <p className="mt-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                            Available from {new Date(minBookingDate).toLocaleDateString()} onwards (Mon-Fri)
+                          </p>
                         ) : null}
                       </div>
 
@@ -736,56 +825,7 @@ export default function AppointmentsPage() {
                       {selectedDoctor && selectedDate && (
                         <div>
                           <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Available Slots</label>
-                          {(() => {
-                            const today = new Date();
-                            today.setHours(0, 0, 0, 0);
-                            const selectedDateObj = new Date(selectedDate);
-                            selectedDateObj.setHours(0, 0, 0, 0);
-
-                            const minDate = new Date(today);
-                            minDate.setDate(today.getDate() + 3);
-                            const maxDate = new Date(today);
-                            maxDate.setDate(today.getDate() + 30);
-
-                            const dayOfWeek = selectedDateObj.getDay();
-                            if (dayOfWeek === 0 || dayOfWeek === 6) {
-                              return <p className="text-red-500 text-[10px] font-black uppercase tracking-[0.2em]">Not available on weekends</p>;
-                            }
-
-                            if (selectedDateObj < minDate || selectedDateObj > maxDate) {
-                              return <p className="text-amber-600 text-[10px] font-black uppercase tracking-[0.2em]">Please select a date between {new Date(minBookingDate).toLocaleDateString()} and {new Date(maxBookingDate).toLocaleDateString()}</p>;
-                            }
-
-                            if (isLoadingSlots) {
-                              return (
-                                <div className="flex items-center gap-3 text-emerald-600 font-bold text-xs uppercase tracking-widest">
-                                  <Spinner size="sm" /> Loading Slots...
-                                </div>
-                              );
-                            }
-
-                            if (availableSlots.length === 0) {
-                              return <p className="text-red-500 text-[10px] font-black uppercase tracking-[0.2em]">No slots available for this date</p>;
-                            }
-
-                            return (
-                              <div className="grid grid-cols-3 gap-2">
-                                {availableSlots.map((slot) => (
-                                  <button
-                                    key={slot.time}
-                                    type="button"
-                                    onClick={() => setSelectedSlot(slot.time)}
-                                    className={`py-3 px-2 rounded-xl text-[10px] font-black uppercase tracking-tighter transition-all ${selectedSlot === slot.time
-                                      ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20'
-                                      : 'bg-white/40 border border-white/60 text-slate-600 hover:bg-white/60'
-                                      }`}
-                                  >
-                                    {slot.time}
-                                  </button>
-                                ))}
-                              </div>
-                            );
-                          })()}
+                          {renderSlotSelectionContent()}
                         </div>
                       )}
                     </div>
@@ -847,39 +887,53 @@ export default function AppointmentsPage() {
             <div className="flex items-center gap-4 mb-8 flex-wrap">
               <button
                 onClick={() => setActiveTab('confirmed')}
-                className={`px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'confirmed'
-                  ? 'bg-emerald-600 text-white shadow-xl shadow-emerald-600/20'
-                  : 'bg-white/40 text-slate-600 border border-white/60 hover:bg-white/60'
-                  }`}
+                className={`px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                  activeTab === 'confirmed'
+                    ? 'bg-emerald-600 text-white shadow-xl shadow-emerald-600/20'
+                    : 'bg-white/40 text-slate-600 border border-white/60 hover:bg-white/60'
+                }`}
               >
                 Confirmed
               </button>
               <button
                 onClick={() => setActiveTab('requested')}
-                className={`px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'requested'
-                  ? 'bg-amber-600 text-white shadow-xl shadow-amber-600/20'
-                  : 'bg-white/40 text-slate-600 border border-white/60 hover:bg-white/60'
-                  }`}
+                className={`px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                  activeTab === 'requested'
+                    ? 'bg-amber-600 text-white shadow-xl shadow-amber-600/20'
+                    : 'bg-white/40 text-slate-600 border border-white/60 hover:bg-white/60'
+                }`}
               >
                 Requested
               </button>
               <button
                 onClick={() => setActiveTab('cancelled')}
-                className={`px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'cancelled'
-                  ? 'bg-red-600 text-white shadow-xl shadow-red-600/20'
-                  : 'bg-white/40 text-slate-600 border border-white/60 hover:bg-white/60'
-                  }`}
+                className={`px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                  activeTab === 'cancelled'
+                    ? 'bg-red-600 text-white shadow-xl shadow-red-600/20'
+                    : 'bg-white/40 text-slate-600 border border-white/60 hover:bg-white/60'
+                }`}
               >
                 Cancelled
               </button>
               <button
-                onClick={() => setActiveTab('rescheduling')}
-                className={`px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'rescheduling'
-                  ? 'bg-cyan-600 text-white shadow-xl shadow-cyan-600/20'
-                  : 'bg-white/40 text-slate-600 border border-white/60 hover:bg-white/60'
-                  }`}
+                onClick={() => setActiveTab('doctorRequests')}
+                className={`px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                  activeTab === 'doctorRequests'
+                    ? 'bg-cyan-600 text-white shadow-xl shadow-cyan-600/20'
+                    : 'bg-white/40 text-slate-600 border border-white/60 hover:bg-white/60'
+                }`}
               >
-                Requests
+                Doctor Requests
+              </button>
+              <button
+                onClick={() => setActiveTab('rescheduling')}
+                className={`px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                  activeTab === 'rescheduling'
+                    ? 'bg-sky-600 text-white shadow-xl shadow-blue-600/20'
+                    : 'bg-white/40 text-slate-600 border border-white/60 hover:bg-white/60'
+                }`}
+              >
+                Rescheduling
               </button>
             </div>
 
@@ -888,7 +942,7 @@ export default function AppointmentsPage() {
               <div className="glass-card p-20 flex flex-col items-center justify-center border-white/40">
                 <Spinner size="lg" message="Loading appointments..." />
               </div>
-            ) : appointments.length === 0 ? (
+            ) : filteredAppointments.length === 0 ? (
               <EmptyState
                 icon={Calendar}
                 title={`No ${activeTab} appointments`}
@@ -896,7 +950,7 @@ export default function AppointmentsPage() {
               />
             ) : (
               <div className="space-y-6">
-                {appointments.map((apt, i) => (
+                {filteredAppointments.map((apt, i) => (
                   <motion.div
                     key={apt.id}
                     initial={{ opacity: 0, y: 20 }}
@@ -905,18 +959,22 @@ export default function AppointmentsPage() {
                     className="glass-card p-8 border-white/60 bg-white/40 hover:bg-white/60 transition-all duration-500 relative"
                   >
                     {/* Status indicator bar */}
-                    <div className={`absolute top-0 left-0 w-1.5 h-full ${activeTab === 'confirmed' ? 'bg-emerald-500' :
+                    <div className={`absolute top-0 left-0 w-1.5 h-full ${
+                      activeTab === 'confirmed' ? 'bg-emerald-500' :
                       activeTab === 'requested' ? 'bg-amber-500' :
-                        activeTab === 'rescheduling' ? 'bg-cyan-500' :
-                          'bg-red-500'
-                      }`} />
+                      activeTab === 'rescheduling' ? 'bg-cyan-500' :
+                      activeTab === 'doctorRequests' ? 'bg-blue-500' :
+                      'bg-red-500'
+                    }`} />
 
                     <div className="flex flex-col lg:flex-row gap-6">
-                      <div className={`w-16 h-16 rounded-2xl flex items-center justify-center font-black text-2xl shadow-sm flex-shrink-0 ${activeTab === 'confirmed' ? 'bg-emerald-100 text-emerald-700' :
+                      <div className={`w-16 h-16 rounded-2xl flex items-center justify-center font-black text-2xl shadow-sm flex-shrink-0 ${
+                        activeTab === 'confirmed' ? 'bg-emerald-100 text-emerald-700' :
                         activeTab === 'requested' ? 'bg-amber-100 text-amber-700' :
-                          activeTab === 'rescheduling' ? 'bg-cyan-100 text-cyan-700' :
-                            'bg-red-100 text-red-700'
-                        }`}>
+                        activeTab === 'rescheduling' ? 'bg-cyan-100 text-cyan-700' :
+                        activeTab === 'doctorRequests' ? 'bg-blue-100 text-blue-700' :
+                        'bg-red-100 text-red-700'
+                      }`}>
                         {apt.doctorName?.charAt(0) || 'D'}
                       </div>
 
@@ -925,13 +983,26 @@ export default function AppointmentsPage() {
                           <h3 className="text-xl font-black text-slate-800 tracking-tight">
                             Dr. {apt.doctorName}
                           </h3>
-                          <span className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest ${apt.appointmentType === 'ONLINE' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700'
-                            }`}>
+                          <span className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest ${
+                            apt.appointmentType === 'ONLINE' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700'
+                          }`}>
                             {apt.appointmentType}
                           </span>
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                                    {/* Status for Rescheduling Tab */}
+                                                    {activeTab === 'rescheduling' && (
+                                                      <div className="flex items-center gap-2 col-span-full">
+                                                        <span className="px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest bg-blue-100 text-blue-700">
+                                                          {apt.status === 'RESCHEDULE_REQUESTED' && apt.rescheduleRequestedBy === 'PATIENT'
+                                                            ? 'In Progress (Waiting for Doctor Response)'
+                                                            : apt.status === 'RESCHEDULE_REQUESTED' && apt.rescheduleRequestedBy === 'DOCTOR'
+                                                              ? 'Doctor Requested Reschedule'
+                                                              : 'Rescheduling'}
+                                                        </span>
+                                                      </div>
+                                                    )}
                           <div className="flex items-center gap-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-white/50 px-3 py-2 rounded-xl">
                             <Calendar size={14} className="text-emerald-500" />
                             {new Date(apt.appointmentDate).toLocaleDateString(undefined, {
@@ -944,7 +1015,7 @@ export default function AppointmentsPage() {
                           </div>
 
                           {/* Appointment Reason - Show for REQUESTED and RESCHEDULING tabs */}
-                          {(activeTab === 'requested' || activeTab === 'rescheduling') && apt.reason && (
+                          {(activeTab === 'requested' || activeTab === 'rescheduling' || activeTab === 'doctorRequests') && apt.reason && (
                             <div className="col-span-full flex items-start gap-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-emerald-50 px-3 py-2 rounded-xl">
                               <AlertCircle size={14} className="text-emerald-500 mt-0.5 flex-shrink-0" />
                               <div>
@@ -969,6 +1040,17 @@ export default function AppointmentsPage() {
                             <div className="col-span-full flex items-start gap-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-red-50 px-3 py-2 rounded-xl">
                               <AlertCircle size={14} className="text-red-500 mt-0.5 flex-shrink-0" />
                               <span className="text-red-600">{apt.cancellationReason}</span>
+                            </div>
+                          )}
+
+                          {/* Reschedule Reason - For Doctor Requests Tab */}
+                          {activeTab === 'doctorRequests' && apt.rescheduleReason && (
+                            <div className="col-span-full flex items-start gap-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-cyan-50 px-3 py-2 rounded-xl">
+                              <AlertCircle size={14} className="text-cyan-500 mt-0.5 flex-shrink-0" />
+                              <div>
+                                <p className="text-cyan-600 font-black">Doctor's Reason:</p>
+                                <p className="text-slate-700 normal-case font-medium mt-1">{apt.rescheduleReason}</p>
+                              </div>
                             </div>
                           )}
                         </div>
@@ -1008,10 +1090,17 @@ export default function AppointmentsPage() {
                         )}
 
                         {/* Action Buttons */}
-                        {(activeTab === 'requested' || activeTab === 'confirmed' || activeTab === 'rescheduling') && (
+                        {(activeTab === 'requested' || activeTab === 'confirmed' || activeTab === 'rescheduling' || activeTab === 'doctorRequests') && (
                           <div className="mt-6 flex flex-wrap items-center gap-4">
-                            {/* Reschedule Button */}
-                            {(activeTab === 'confirmed' || activeTab === 'rescheduling') && (
+                            {/* Reschedule Button - For Doctor Requests tab, this shows the doctor's request */}
+                            {activeTab === 'doctorRequests' ? (
+                              <button
+                                onClick={() => openRescheduleModal(apt)}
+                                className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-600/20"
+                              >
+                                Respond to Reschedule Request
+                              </button>
+                            ) : (activeTab === 'confirmed' || (activeTab === 'rescheduling' && apt.rescheduleRequestedBy === 'DOCTOR')) && (
                               <button
                                 onClick={() => openRescheduleModal(apt)}
                                 className="px-6 py-3 bg-cyan-100 hover:bg-cyan-200 text-cyan-700 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
@@ -1080,7 +1169,6 @@ export default function AppointmentsPage() {
           </div>
         </div>
       </div>
-
 
       {/* Reschedule Modal */}
       <AnimatePresence>
@@ -1152,18 +1240,19 @@ export default function AppointmentsPage() {
                         {rescheduleAvailableSlots
                           .filter((slot) => slot.time !== appointmentToReschedule.slotStartTime)
                           .map((slot) => (
-                          <button
-                            key={slot.time}
-                            type="button"
-                            onClick={() => setRescheduleSlot(slot.time)}
-                            className={`py-3 px-2 rounded-xl text-[10px] font-black uppercase tracking-tighter transition-all ${rescheduleSlot === slot.time
-                              ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-600/20'
-                              : 'bg-slate-50 border border-slate-200 text-slate-600 hover:bg-white'
+                            <button
+                              key={slot.time}
+                              type="button"
+                              onClick={() => setRescheduleSlot(slot.time)}
+                              className={`py-3 px-2 rounded-xl text-[10px] font-black uppercase tracking-tighter transition-all ${
+                                rescheduleSlot === slot.time
+                                  ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-600/20'
+                                  : 'bg-slate-50 border border-slate-200 text-slate-600 hover:bg-white'
                               }`}
-                          >
-                            {slot.time}
-                          </button>
-                        ))}
+                            >
+                              {slot.time}
+                            </button>
+                          ))}
                       </div>
                     )}
                   </div>
@@ -1203,9 +1292,9 @@ export default function AppointmentsPage() {
         )}
       </AnimatePresence>
 
-      {/* Doctor Cancelled Reschedule Modal */}
+      {/* Doctor Cancelled Reschedule Modal - Only for rescheduling tab */}
       <AnimatePresence>
-        {showDocCancelledModal && appointmentWithDocCancel && (
+        {activeTab === 'rescheduling' && showDocCancelledModal && appointmentWithDocCancel && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -1378,6 +1467,18 @@ export default function AppointmentsPage() {
                 <p className="text-[10px] font-bold text-red-700 uppercase tracking-widest">
                   ⚠ This action cannot be undone
                 </p>
+                {/* Refund info for reschedule cancellation */}
+                {appointmentToCancel && appointmentToCancel.status === 'RESCHEDULE_REQUESTED' && appointmentToCancel.paymentStatus === 'PAID' && (
+                  appointmentToCancel.rescheduleRequestedBy === 'PATIENT' ? (
+                    <p className="mt-2 text-xs text-red-600 font-bold">
+                      Refund: Rs. 750 (Deduction: Rs. 250 for cancellation)
+                    </p>
+                  ) : appointmentToCancel.rescheduleRequestedBy === 'DOCTOR' ? (
+                    <p className="mt-2 text-xs text-emerald-600 font-bold">
+                      Full refund: Rs. 1,000 (Doctor requested reschedule)
+                    </p>
+                  ) : null
+                )}
               </div>
 
               <div className="space-y-4 mb-8">

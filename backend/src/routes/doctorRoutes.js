@@ -12,6 +12,7 @@ import {
     completeAppointmentController,
     markNoShowController,
     requestDoctorEmergencyRescheduleController,
+    approveRescheduleRequestedAppointmentController,
 } from '../controllers/appointmentController.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 
@@ -42,6 +43,9 @@ router.post('/appointments/:id/reject-reschedule', rejectRescheduledAppointmentC
 router.post('/appointments/:id/complete', completeAppointmentController);
 router.post('/appointments/:id/no-show', markNoShowController);
 router.post('/appointments/:id/request-emergency-reschedule', requestDoctorEmergencyRescheduleController);
+
+// Approve patient-proposed reschedule
+router.post('/appointments/:id/approve-reschedule', approveRescheduleRequestedAppointmentController);
 
 export default router;
 

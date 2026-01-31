@@ -1,54 +1,4 @@
 import Appointment from '../models/Appointment.js';
-import Payment from '../models/Payment.js';
-import EmergencyCancellationRequest from '../models/EmergencyCancellationRequest.js';
-import Patient from '../models/Patient.js';
-import Doctor from '../models/Doctor.js';
-import { sendEmail, sendEmailAsync } from '../config/email.js';
-import { getIO } from '../config/socket.js';
-import DoctorEmergencyRescheduleRequest from '../models/DoctorEmergencyRescheduleRequest.js';
-
-// Constants
-const APPOINTMENT_FEE = 1000;
-const CANCELLATION_DEDUCTION = 250;
-const SLOT_DURATION_MINUTES = 30;
-const WORKING_HOURS = {
-    start: 9, // 9 AM
-    end: 17,  // 5 PM
-    breakStart: 13, // 1 PM
-    breakEnd: 14,   // 2 PM
-};
-const MIN_BOOKING_DAYS_ADVANCE = 3;
-const MAX_BOOKING_DAYS_ADVANCE = 30; // Approx. 1 month
-const MIN_PATIENT_CANCEL_HOURS = 24;
-const MIN_DOCTOR_CANCEL_HOURS = 24;
-const EMERGENCY_REVIEW_WINDOW_HOURS = 12;
-const PAYMENT_DEADLINE_DAYS = 1; // Auto-cancel CONFIRMED+PENDING if payment not done within 1 day of appointment
-
-/**
- * Generate a unique challan number
- */
-const generateChallanNumber = () => {
-    const timestamp = Date.now().toString(36).toUpperCase();
-    const random = Math.random().toString(36).substring(2, 6).toUpperCase();
-    return `HLX-${timestamp}-${random}`;
-};
-
-/**
- * Calculate end time from start time
- */
-const calculateEndTime = (startTime) => {
-    const [hours, minutes] = startTime.split(':').map(Number);
-    let endMinutes = minutes + SLOT_DURATION_MINUTES;
-    let endHours = hours;
-
-    if (endMinutes >= 60) {
-        endMinutes -= 60;
-        endHours += 1;
-    }
-
-    return `${String(endHours).padStart(2, '0')}:${String(endMinutes).padStart(2, '0')}`;
-};
-
 /**
  * Get all available 30-minute slots for a given date and doctor
  */
@@ -243,8 +193,9 @@ export const confirmAppointment = async (appointmentId, doctorId, meetingLink = 
         throw err;
     }
 
-    if (appointment.status !== 'REQUESTED') {
-        const err = new Error('Only requested appointments can be confirmed');
+    // Allow confirming both REQUESTED and RESCHEDULE_REQUESTED appointments
+    if (appointment.status !== 'REQUESTED' && appointment.status !== 'RESCHEDULE_REQUESTED') {
+        const err = new Error('Only requested or reschedule-requested appointments can be confirmed');
         err.statusCode = 400;
         throw err;
     }
@@ -709,7 +660,7 @@ export const handleRescheduleRejectionResponse = async (appointmentId, patientId
         // Cancel with partial refund (Rs. 250 deduction)
         let refundAmount = 0;
         if (appointment.payment_status === 'PAID') {
-            refundAmount = APPOINTMENT_FEE - CANCELLATION_DEDUCTION; // 750
+            refundAmount = APPOINTMENT_FEE - CANCELLATION_DEDUCTION; // 1000 - 250 = 750
             appointment.refund_amount = refundAmount;
             appointment.payment_status = 'PARTIAL_REFUND';
 
@@ -2244,4 +2195,31 @@ export const getDoctorEmergencyRequests = async (status = 'PENDING') => {
         .populate({ path: 'doctor_id', populate: { path: 'user_id' } })
         .populate({ path: 'appointment_id', populate: { path: 'patient_id', populate: { path: 'user_id' } } })
         .sort({ created_at: -1 });
+};
+
+/**
+ * Approve a patient-proposed reschedule (doctor accepts new date/time)
+ */
+export const approveRescheduleRequestedAppointment = async (appointmentId, doctorId) => {
+    const appointment = await Appointment.findById(appointmentId);
+    if (!appointment) {
+        const err = new Error('Appointment not found');
+        err.statusCode = 404;
+        throw err;
+    }
+    if (appointment.doctor_id.toString() !== doctorId.toString()) {
+        const err = new Error('Unauthorized');
+        err.statusCode = 403;
+        throw err;
+    }
+    if (appointment.status !== 'RESCHEDULE_REQUESTED' || appointment.reschedule_requested_by !== 'PATIENT') {
+        const err = new Error('Only patient-proposed reschedules can be approved');
+        err.statusCode = 400;
+        throw err;
+    }
+    appointment.status = 'CONFIRMED';
+    appointment.reschedule_requested_by = undefined;
+    await appointment.save();
+    // Optionally notify patient here
+    return appointment;
 };
