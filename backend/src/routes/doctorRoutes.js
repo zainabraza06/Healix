@@ -11,6 +11,7 @@ import {
     rejectRescheduledAppointmentController,
     completeAppointmentController,
     markNoShowController,
+    getPastDoctorAppointmentsController,
     requestDoctorEmergencyRescheduleController,
     approveRescheduleRequestedAppointmentController,
 } from '../controllers/appointmentController.js';
@@ -33,6 +34,7 @@ router.post('/alerts/:alertId/resolve', resolveAlertController);
 
 // Appointments
 router.get('/appointments', getDoctorAppointmentsController);
+router.get('/appointments/past', getPastDoctorAppointmentsController);
 router.get('/appointments/requests', getAppointmentRequestsController);
 router.get('/appointments/today', getDoctorDailyScheduleController);
 router.get('/appointments/tomorrow', getDoctorNextDayScheduleController);

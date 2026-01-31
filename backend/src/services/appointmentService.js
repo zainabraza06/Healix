@@ -1,4 +1,5 @@
 import Appointment from '../models/Appointment.js';
+import Prescription from '../models/Prescription.js';
 /**
  * Get all available 30-minute slots for a given date and doctor
  */
@@ -1751,7 +1752,7 @@ export const reviewEmergencyCancellation = async (requestId, adminId, approved, 
 /**
  * Complete appointment (Doctor action)
  */
-export const completeAppointment = async (appointmentId, doctorId, prescription, instructions) => {
+export const completeAppointment = async (appointmentId, doctorId, medications, instructions) => {
     const appointment = await Appointment.findById(appointmentId)
         .populate({ path: 'patient_id', populate: { path: 'user_id' } })
         .populate({ path: 'doctor_id', populate: { path: 'user_id' } });
@@ -1774,9 +1775,30 @@ export const completeAppointment = async (appointmentId, doctorId, prescription,
         throw err;
     }
 
+    // Check if appointment date is in the past or today
+    const now = new Date();
+    const appointmentDate = new Date(appointment.appointment_date);
+    appointmentDate.setHours(0, 0, 0, 0); // Start of appointment day
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+    
+    if (appointmentDate > today) {
+        const err = new Error('Cannot complete future appointments');
+        err.statusCode = 400;
+        throw err;
+    }
+
+    // Create prescription record
+    const prescriptionRecord = await Prescription.create({
+        patient_id: appointment.patient_id._id,
+        doctor_id: appointment.doctor_id._id,
+        appointment_id: appointment._id,
+        medications: medications,
+        notes: instructions, // Using instructions as notes
+    });
+
     appointment.status = 'COMPLETED';
-    appointment.prescription = prescription;
-    appointment.instructions = instructions;
+    appointment.prescription_id = prescriptionRecord._id;
     appointment.completed_at = new Date();
     appointment.patient_attended = true;
     appointment.chat_enabled = true;
@@ -1845,6 +1867,14 @@ export const markNoShow = async (appointmentId, doctorId) => {
 
     if (appointment.status !== 'CONFIRMED') {
         const err = new Error('Only confirmed appointments can be marked as no-show');
+        err.statusCode = 400;
+        throw err;
+    }
+
+    // Check if appointment date is in the past
+    const now = new Date();
+    if (appointment.appointment_date >= now) {
+        const err = new Error('Cannot mark future appointments as no-show');
         err.statusCode = 400;
         throw err;
     }
@@ -1987,6 +2017,112 @@ export const getDoctorAppointments = async (doctorId, status = null, date = null
             paymentStatus: apt.payment_status,
             prescription: apt.prescription,
             instructions: apt.instructions,
+            cancelledBy: apt.cancelled_by,
+            cancellationReason: apt.cancellation_reason,
+            rescheduleReason: apt.reschedule_reason,
+            rescheduleRequestedBy: apt.reschedule_requested_by,
+            createdAt: apt.created_at,
+        })),
+        pageNumber: page,
+        pageSize: size,
+        totalElements,
+        totalPages: Math.ceil(totalElements / size)
+    };
+};
+
+/**
+ * Get past appointments for doctor (appointments that have already occurred)
+ */
+export const getPastDoctorAppointments = async (doctorId, page = 0, size = 10) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Set to start of today
+    
+    const query = { 
+        doctor_id: doctorId,
+        appointment_date: { $lt: today } // Only appointments before today
+    };
+
+    const skip = page * size;
+    const totalElements = await Appointment.countDocuments(query);
+    const appointments = await Appointment.find(query)
+        .populate({ path: 'patient_id', populate: { path: 'user_id', select: 'full_name email' } })
+        .populate('prescription_id')
+        .sort({ appointment_date: -1, slot_start_time: -1 })
+        .skip(skip)
+        .limit(size)
+        .lean();
+
+    return {
+        content: appointments.map(apt => ({
+            id: apt._id,
+            patientId: apt.patient_id?._id,
+            patientName: apt.patient_id?.user_id?.full_name || 'Unknown Patient',
+            patientEmail: apt.patient_id?.user_id?.email,
+            appointmentDate: apt.appointment_date,
+            slotStartTime: apt.slot_start_time,
+            slotEndTime: apt.slot_end_time,
+            appointmentType: apt.appointment_type,
+            status: apt.status,
+            reason: apt.reason,
+            meetingLink: apt.meeting_link,
+            paymentStatus: apt.payment_status,
+            prescription: apt.prescription_id,
+            instructions: apt.instructions,
+            completedAt: apt.completed_at,
+            patientAttended: apt.patient_attended,
+            cancelledBy: apt.cancelled_by,
+            cancellationReason: apt.cancellation_reason,
+            rescheduleReason: apt.reschedule_reason,
+            rescheduleRequestedBy: apt.reschedule_requested_by,
+            createdAt: apt.created_at,
+        })),
+        pageNumber: page,
+        pageSize: size,
+        totalElements,
+        totalPages: Math.ceil(totalElements / size)
+    };
+};
+
+/**
+ * Get past appointments for patient
+ */
+export const getPastPatientAppointments = async (patientId, page = 0, size = 10) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Set to start of today
+    
+    const query = { 
+        patient_id: patientId,
+        appointment_date: { $lt: today } // Only appointments before today
+    };
+
+    const skip = page * size;
+    const totalElements = await Appointment.countDocuments(query);
+    const appointments = await Appointment.find(query)
+        .populate({ path: 'doctor_id', populate: { path: 'user_id', select: 'full_name email' } })
+        .populate('prescription_id')
+        .sort({ appointment_date: -1, slot_start_time: -1 })
+        .skip(skip)
+        .limit(size)
+        .lean();
+
+    return {
+        content: appointments.map(apt => ({
+            id: apt._id,
+            doctorId: apt.doctor_id?._id,
+            doctorName: apt.doctor_id?.user_id?.full_name || 'Unknown Doctor',
+            doctorEmail: apt.doctor_id?.user_id?.email,
+            appointmentDate: apt.appointment_date,
+            slotStartTime: apt.slot_start_time,
+            slotEndTime: apt.slot_end_time,
+            appointmentType: apt.appointment_type,
+            status: apt.status,
+            reason: apt.reason,
+            meetingLink: apt.meeting_link,
+            paymentStatus: apt.payment_status,
+            prescription: apt.prescription_id,
+            instructions: apt.instructions,
+            completedAt: apt.completed_at,
+            patientAttended: apt.patient_attended,
             cancelledBy: apt.cancelled_by,
             cancellationReason: apt.cancellation_reason,
             rescheduleReason: apt.reschedule_reason,
