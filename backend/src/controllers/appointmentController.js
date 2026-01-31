@@ -5,6 +5,9 @@ import {
     processPayment,
     cancelAppointmentByPatient,
     cancelAppointmentByDoctor,
+    cancelRescheduleRequestedByPatient,
+    rejectRescheduledAppointment,
+    handleRescheduleRejectionResponse,
     requestEmergencyCancellation,
     reviewEmergencyCancellation,
     completeAppointment,
@@ -16,7 +19,8 @@ import {
     getPendingEmergencyCancellations,
     getAppointmentById,
     cleanupExpiredRequests,
-    rescheduleAppointment,
+    requestRescheduleByDoctor,
+    rescheduleAppointmentByPatient,
 } from '../services/appointmentService.js';
 import Patient from '../models/Patient.js';
 import Doctor from '../models/Doctor.js';
@@ -77,7 +81,7 @@ export const requestAppointmentController = async (req, res, next) => {
             action: 'REQUEST_APPOINTMENT',
             entityType: 'APPOINTMENT',
             entityId: appointment._id,
-            description: `Appointment requested with doctor ${doctorId}`,
+            description: `Appointment requested with doctor ${doctorId} `,
         });
 
         res.status(201).json(successResponse('Appointment requested successfully', appointment));
@@ -141,7 +145,7 @@ export const cancelPatientAppointmentController = async (req, res, next) => {
             action: 'CANCEL_APPOINTMENT',
             entityType: 'APPOINTMENT',
             entityId: id,
-            description: `Appointment cancelled. Refund: Rs. ${result.refundAmount}`,
+            description: `Appointment cancelled.Refund: Rs.${result.refundAmount} `,
         });
 
         res.json(successResponse('Appointment cancelled', {
@@ -421,6 +425,126 @@ export const confirmAppointmentController = async (req, res, next) => {
 };
 
 /**
+ * Request reschedule (Doctor)
+ */
+export const requestRescheduleController = async (req, res, next) => {
+    try {
+        const appointmentId = req.params.id;
+        const doctorId = req.user.role === 'DOCTOR' ? req.user.doctor_id : null;
+        const { reason } = req.body;
+
+        if (!reason) {
+            return res.status(400).json(errorResponse('Reschedule reason is required'));
+        }
+
+        const doctor = await Doctor.findOne({ user_id: req.user._id });
+        if (!doctor) {
+            return res.status(404).json(errorResponse('Doctor profile not found'));
+        }
+
+        const appointment = await requestRescheduleByDoctor(appointmentId, doctor._id, reason);
+
+        await logSuccess({
+            req,
+            userId: req.user._id,
+            action: 'REQUEST_RESCHEDULE',
+            entityType: 'APPOINTMENT',
+            entityId: appointmentId,
+            description: 'Doctor requested reschedule',
+        });
+
+        res.json(successResponse('Reschedule requested successfully', appointment));
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * Reschedule appointment (Patient)
+ */
+export const rescheduleAppointmentByPatientController = async (req, res, next) => {
+    try {
+        const appointmentId = req.params.id;
+        const { date, time, reason } = req.body;
+
+        if (!date || !time) {
+            return res.status(400).json(errorResponse('Date and time are required'));
+        }
+
+        const patient = await Patient.findOne({ user_id: req.user._id });
+        if (!patient) {
+            return res.status(404).json(errorResponse('Patient profile not found'));
+        }
+
+        const appointment = await rescheduleAppointmentByPatient(
+            appointmentId,
+            patient._id,
+            date,
+            time,
+            reason
+        );
+
+        await logSuccess({
+            req,
+            userId: req.user._id,
+            action: 'RESCHEDULE_APPOINTMENT',
+            entityType: 'APPOINTMENT',
+            entityId: appointmentId,
+            description: 'Patient rescheduled appointment',
+        });
+
+        res.json(successResponse('Appointment rescheduled successfully', appointment));
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * Cancel RESCHEDULE_REQUESTED appointment (Patient chooses not to reschedule)
+ */
+export const cancelRescheduleRequestedController = async (req, res, next) => {
+    try {
+        const appointmentId = req.params.id;
+        const { reason } = req.body;
+
+        if (!reason) {
+            return res.status(400).json(errorResponse('Cancellation reason is required'));
+        }
+
+        const patient = await Patient.findOne({ user_id: req.user._id });
+        if (!patient) {
+            return res.status(404).json(errorResponse('Patient profile not found'));
+        }
+
+        const result = await cancelRescheduleRequestedByPatient(appointmentId, patient._id, reason);
+
+        await logSuccess({
+            req,
+            userId: req.user._id,
+            action: 'CANCEL_RESCHEDULE_REQUESTED',
+            entityType: 'APPOINTMENT',
+            entityId: appointmentId,
+            description: `Appointment cancelled after reschedule request. Refund: Rs.${result.refundAmount}`,
+        });
+
+        res.json(successResponse('Appointment cancelled', {
+            appointment: result.appointment,
+            refundAmount: result.refundAmount,
+        }));
+    } catch (error) {
+        await logFailure({
+            req,
+            userId: req.user._id,
+            action: 'CANCEL_RESCHEDULE_REQUESTED',
+            entityType: 'APPOINTMENT',
+            description: 'Failed to cancel reschedule-requested appointment',
+            error,
+        });
+        next(error);
+    }
+};
+
+/**
  * Cancel appointment (Doctor)
  */
 export const cancelDoctorAppointmentController = async (req, res, next) => {
@@ -445,7 +569,7 @@ export const cancelDoctorAppointmentController = async (req, res, next) => {
             action: 'CANCEL_APPOINTMENT',
             entityType: 'APPOINTMENT',
             entityId: id,
-            description: `Appointment cancelled by doctor. Refund: Rs. ${result.refundAmount}`,
+            description: `Appointment cancelled by doctor.Refund: Rs.${result.refundAmount} `,
         });
 
         res.json(successResponse('Appointment cancelled', result));
@@ -455,31 +579,140 @@ export const cancelDoctorAppointmentController = async (req, res, next) => {
 };
 
 /**
- * Reschedule appointment (Doctor)
+        next(error);
+    }
+};
+
+/**
+ * Reject rescheduled appointment (Doctor)
  */
-export const rescheduleAppointmentController = async (req, res, next) => {
+export const rejectRescheduledAppointmentController = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { dateTime } = req.body;
+        const { reason } = req.body;
+
+        if (!reason) {
+            return res.status(400).json(errorResponse('Rejection reason is required'));
+        }
 
         const doctor = await Doctor.findOne({ user_id: req.user._id });
         if (!doctor) {
             return res.status(404).json(errorResponse('Doctor profile not found'));
         }
 
-        const appointment = await rescheduleAppointment(id, doctor._id, dateTime);
+        const appointment = await rejectRescheduledAppointment(id, doctor._id, reason);
 
         await logSuccess({
             req,
             userId: req.user._id,
-            action: 'RESCHEDULE_APPOINTMENT',
+            action: 'REJECT_RESCHEDULE',
             entityType: 'APPOINTMENT',
             entityId: id,
-            description: 'Appointment rescheduled by doctor',
+            description: 'Doctor rejected appointment reschedule request',
         });
 
-        res.json(successResponse('Appointment rescheduled', appointment));
+        res.json(successResponse('Reschedule request rejected', appointment));
     } catch (error) {
+        await logFailure({
+            req,
+            userId: req.user._id,
+            action: 'REJECT_RESCHEDULE',
+            entityType: 'APPOINTMENT',
+            description: 'Failed to reject reschedule',
+            error,
+        });
+        next(error);
+    }
+};
+
+/**
+ * Handle patient response to rejected reschedule (keep original or cancel)
+ */
+export const handleRescheduleRejectionResponseController = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const { action, reason } = req.body;
+
+        if (!action || !['keep_original', 'cancel'].includes(action)) {
+            return res.status(400).json(errorResponse('Valid action is required: keep_original or cancel'));
+        }
+
+        const patient = await Patient.findOne({ user_id: req.user._id });
+        if (!patient) {
+            return res.status(404).json(errorResponse('Patient profile not found'));
+        }
+
+        const result = await handleRescheduleRejectionResponse(id, patient._id, action, reason);
+
+        await logSuccess({
+            req,
+            userId: req.user._id,
+            action: action === 'keep_original' ? 'KEEP_ORIGINAL_APPOINTMENT' : 'CANCEL_AFTER_REJECTION',
+            entityType: 'APPOINTMENT',
+            entityId: id,
+            description: result.message,
+        });
+
+        res.json(successResponse(result.message, {
+            appointment: result.appointment,
+            refundAmount: result.refundAmount || 0,
+        }));
+    } catch (error) {
+        await logFailure({
+            req,
+            userId: req.user._id,
+            action: 'HANDLE_RESCHEDULE_REJECTION',
+            entityType: 'APPOINTMENT',
+            description: 'Failed to handle reschedule rejection response',
+            error,
+        });
+        next(error);
+    }
+};
+
+/**
+ * Respond to doctor's cancellation of reschedule request
+ */
+export const respondToDocCancelledRescheduleController = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const { choice, reason } = req.body;
+
+        if (!choice || !['keep', 'cancel'].includes(choice)) {
+            return res.status(400).json(errorResponse('Valid choice is required: keep or cancel'));
+        }
+
+        const patient = await Patient.findOne({ user_id: req.user._id });
+        if (!patient) {
+            return res.status(404).json(errorResponse('Patient profile not found'));
+        }
+
+        const { respondToDocCancelledReschedule } = await import('../services/appointmentService.js');
+        const result = await respondToDocCancelledReschedule(id, patient._id, choice, reason);
+
+        await logSuccess({
+            req,
+            userId: req.user._id,
+            action: choice === 'keep' ? 'KEEP_ORIGINAL_AFTER_DOC_CANCEL' : 'CANCEL_AFTER_DOC_CANCEL',
+            entityType: 'APPOINTMENT',
+            entityId: id,
+            description: `Patient chose to ${choice === 'keep' ? 'keep original slot' : 'cancel appointment'} after doctor cancelled reschedule request`,
+        });
+
+        res.json(successResponse(`Appointment ${result.action} successfully`, {
+            appointment: result.appointment,
+            action: result.action,
+            refundAmount: result.refundAmount || 0,
+        }));
+    } catch (error) {
+        await logFailure({
+            req,
+            userId: req.user._id,
+            action: 'RESPOND_TO_DOC_CANCELLED_RESCHEDULE',
+            entityType: 'APPOINTMENT',
+            description: 'Failed to respond to doctor cancelled reschedule',
+            error,
+        });
         next(error);
     }
 };
@@ -579,13 +812,70 @@ export const reviewEmergencyCancellationController = async (req, res, next) => {
             action: approved ? 'APPROVE_EMERGENCY_CANCELLATION' : 'REJECT_EMERGENCY_CANCELLATION',
             entityType: 'EMERGENCY_CANCELLATION_REQUEST',
             entityId: id,
-            description: `Emergency cancellation ${approved ? 'approved' : 'rejected'}. Refund: Rs. ${result.refundAmount}`,
+            description: `Emergency cancellation ${approved ? 'approved' : 'rejected'}.Refund: Rs.${result.refundAmount} `,
         });
 
         res.json(successResponse(
-            `Emergency cancellation ${approved ? 'approved' : 'rejected'}`,
+            `Emergency cancellation ${approved ? 'approved' : 'rejected'} `,
             result
         ));
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * Request emergency reschedule (Doctor)
+ */
+export const requestDoctorEmergencyRescheduleController = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const { reason } = req.body;
+        const doctorId = req.user.profileId;
+
+        // Dynamically import to avoid circular dependency
+        const { requestDoctorEmergencyReschedule } = await import('../services/appointmentService.js');
+
+        const request = await requestDoctorEmergencyReschedule(id, doctorId, reason);
+        res.status(201).json(successResponse('Emergency reschedule request submitted', request));
+
+        logSuccess(req, 'Doctor Emergency Reschedule Requested', { appointmentId: id });
+    } catch (error) {
+        logFailure(req, 'Doctor Emergency Reschedule Request Failed', { error: error.message });
+        next(error);
+    }
+};
+
+/**
+ * Approve emergency reschedule (Admin)
+ */
+export const approveDoctorEmergencyRescheduleController = async (req, res, next) => {
+    try {
+        const { requestId } = req.params;
+        const adminId = req.user.profileId;
+
+        const { approveDoctorEmergencyReschedule } = await import('../services/appointmentService.js');
+
+        const result = await approveDoctorEmergencyReschedule(requestId, adminId);
+        res.json(successResponse('Emergency reschedule approved', result));
+
+        logSuccess(req, 'Doctor Emergency Reschedule Approved', { requestId });
+    } catch (error) {
+        logFailure(req, 'Doctor Emergency Reschedule Approval Failed', { error: error.message });
+        next(error);
+    }
+};
+
+/**
+ * Get doctor emergency requests (Admin)
+ */
+export const getDoctorEmergencyRequestsController = async (req, res, next) => {
+    try {
+        const { status } = req.query;
+        const { getDoctorEmergencyRequests } = await import('../services/appointmentService.js');
+
+        const requests = await getDoctorEmergencyRequests(status);
+        res.json(successResponse('Emergency requests retrieved', requests));
     } catch (error) {
         next(error);
     }

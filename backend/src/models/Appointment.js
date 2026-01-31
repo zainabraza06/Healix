@@ -34,7 +34,7 @@ const appointmentSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['REQUESTED', 'CONFIRMED', 'COMPLETED', 'CANCELLED', 'NO_SHOW'],
+      enum: ['REQUESTED', 'CONFIRMED', 'COMPLETED', 'CANCELLED', 'NO_SHOW', 'RESCHEDULE_REQUESTED'],
       default: 'REQUESTED',
     },
     // Appointment details
@@ -96,7 +96,7 @@ const appointmentSchema = new mongoose.Schema(
     // Cancellation fields
     cancelled_by: {
       type: String,
-      enum: ['PATIENT', 'DOCTOR', 'ADMIN'],
+      enum: ['PATIENT', 'DOCTOR', 'ADMIN', 'SYSTEM'],
     },
     cancellation_reason: {
       type: String,
@@ -104,10 +104,45 @@ const appointmentSchema = new mongoose.Schema(
     cancelled_at: {
       type: Date,
     },
+    reschedule_reason: {
+      type: String,
+    },
+    // Track who requested the reschedule
+    reschedule_requested_by: {
+      type: String,
+      enum: ['PATIENT', 'DOCTOR'],
+    },
+    // Reschedule rejection fields
+    reschedule_rejected: {
+      type: Boolean,
+      default: false,
+    },
+    reschedule_rejection_reason: {
+      type: String,
+    },
+    // Doctor cancelled reschedule request - patient needs to choose
+    doctor_cancelled_reschedule_request: {
+      type: Boolean,
+      default: false,
+    },
+    doctor_cancellation_reason: {
+      type: String,
+    },
+    doctor_cancelled_at: {
+      type: Date,
+    },
     // Chat eligibility - set to true after completion
     chat_enabled: {
       type: Boolean,
       default: false,
+    },
+    // Reminder fields
+    reminder_sent: {
+      type: Boolean,
+      default: false,
+    },
+    reminder_sent_at: {
+      type: Date,
     },
   },
   { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } }

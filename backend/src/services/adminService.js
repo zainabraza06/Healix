@@ -1,3 +1,61 @@
+// Get all appointments for download (CSV/JSON/PDF)
+export const getAllAppointmentsForDownload = async (status, payment_status) => {
+  try {
+    const query = {};
+    if (status) query.status = status;
+    if (payment_status) query.payment_status = payment_status;
+    const appointments = await Appointment.find(query)
+      .populate({
+        path: 'patient_id',
+        populate: { path: 'user_id', select: 'full_name name email' },
+      })
+      .populate({
+        path: 'doctor_id',
+        populate: { path: 'user_id', select: 'full_name name email' },
+      })
+      .sort({ appointment_date: -1, slot_start_time: -1 })
+      .lean();
+    return appointments.map(a => ({
+      id: a._id?.toString?.(),
+      appointment_date: a.appointment_date,
+      slot_start_time: a.slot_start_time,
+      slot_end_time: a.slot_end_time,
+      patient_name: a.patient_id?.user_id?.full_name || a.patient_id?.user_id?.name || 'N/A',
+      doctor_name: a.doctor_id?.user_id?.full_name || a.doctor_id?.user_id?.name || 'N/A',
+      status: a.status,
+      payment_status: a.payment_status,
+      prescription: a.prescription || '',
+      instructions: a.instructions || '',
+    }));
+  } catch (error) {
+    throw new Error(`Failed to fetch appointments for download: ${error.message}`);
+  }
+};
+
+// Format appointments for CSV download
+export const formatAppointmentsForCSV = async (data) => {
+  const headers = ['id', 'appointment_date', 'slot_start_time', 'slot_end_time', 'patient_name', 'doctor_name', 'status', 'payment_status', 'prescription', 'instructions'];
+  const rows = (data || []).map((a) => [
+    a.id,
+    a.appointment_date ? new Date(a.appointment_date).toISOString() : '',
+    a.slot_start_time,
+    a.slot_end_time,
+    a.patient_name,
+    a.doctor_name,
+    a.status,
+    a.payment_status,
+    a.prescription,
+    a.instructions,
+  ]);
+  const csv = [headers.join(','), ...rows.map((r) => r.map((v) => {
+    const s = v == null ? '' : String(v);
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  }).join(','))].join('\n');
+  return csv;
+};
 import Patient from '../models/Patient.js';
 import Doctor from '../models/Doctor.js';
 import Admin from '../models/Admin.js';
@@ -610,9 +668,13 @@ export const getPaginatedDoctors = async (page = 0, size = 10, search = '', requ
 /**
  * Get paginated appointments
  */
-export const getPaginatedAppointments = async (page = 0, size = 10) => {
+export const getPaginatedAppointments = async (page = 0, size = 10, status, payment_status) => {
   try {
-    const appointments = await Appointment.find()
+    const query = {};
+    if (status) query.status = status;
+    if (payment_status) query.payment_status = payment_status;
+
+    const appointments = await Appointment.find(query)
       .populate({
         path: 'patient_id',
         populate: { path: 'user_id', select: 'full_name name email' },
@@ -626,7 +688,7 @@ export const getPaginatedAppointments = async (page = 0, size = 10) => {
       .limit(size)
       .lean();
 
-    const totalElements = await Appointment.countDocuments();
+    const totalElements = await Appointment.countDocuments(query);
     const totalPages = Math.ceil(totalElements / size);
 
     return {

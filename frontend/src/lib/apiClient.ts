@@ -262,6 +262,11 @@ class ApiClient {
     return response.data;
   }
 
+  async rescheduleAppointmentPatient(appointmentId: string, date: string, time: string, reason: string): Promise<ApiResponse<any>> {
+    const response = await this.client.post(`/patient/appointments/${appointmentId}/reschedule`, { date, time, reason });
+    return response.data;
+  }
+
   async createStripeCheckout(appointmentId: string): Promise<ApiResponse<{ sessionId: string; url: string }>> {
     const response = await this.client.post(`/patient/appointments/${appointmentId}/checkout`);
     return response.data;
@@ -344,8 +349,13 @@ class ApiClient {
     return response.data;
   }
 
-  async rescheduleAppointment(appointmentId: string, dateTime: string): Promise<ApiResponse<any>> {
-    const response = await this.client.post(`/doctor/appointments/${appointmentId}/reschedule`, { dateTime });
+  async requestReschedule(appointmentId: string, reason: string): Promise<ApiResponse<any>> {
+    const response = await this.client.post(`/doctor/appointments/${appointmentId}/request-reschedule`, { reason });
+    return response.data;
+  }
+
+  async requestDoctorEmergencyReschedule(appointmentId: string, reason: string): Promise<ApiResponse<any>> {
+    const response = await this.client.post(`/doctor/appointments/${appointmentId}/request-emergency-reschedule`, { reason });
     return response.data;
   }
 
@@ -523,6 +533,16 @@ class ApiClient {
 
   async reviewEmergencyCancellation(requestId: string, approved: boolean, notes: string): Promise<ApiResponse<any>> {
     const response = await this.client.post(`/admin/emergency-cancellations/${requestId}/review`, { approved, notes });
+    return response.data;
+  }
+
+  async getDoctorEmergencyRequests(status: string = 'PENDING'): Promise<ApiResponse<any[]>> {
+    const response = await this.client.get(`/admin/emergency-reschedules?status=${status}`);
+    return response.data;
+  }
+
+  async approveDoctorEmergencyReschedule(requestId: string): Promise<ApiResponse<any>> {
+    const response = await this.client.post(`/admin/emergency-reschedules/${requestId}/approve`);
     return response.data;
   }
 

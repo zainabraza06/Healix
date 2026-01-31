@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/lib/authStore';
 import { apiClient } from '@/lib/apiClient';
 import ProtectedLayout from '@/components/ProtectedLayout';
-import { Loader, AlertCircle, Calendar, Users, Clock, AlertTriangle, Lock, CheckCircle, XCircle, Activity, BarChart3, ShieldCheck, Power, X, MessageCircle, Bell, Stethoscope, Download } from 'lucide-react';
+import { Loader, AlertCircle, Calendar, Users, Clock, AlertTriangle, Lock, CheckCircle, XCircle, Activity, BarChart3, ShieldCheck, Power, X, MessageCircle, Bell, Stethoscope, Download, Video } from 'lucide-react';
 import ChangePasswordModal from '@/components/ChangePasswordModal';
 import toast from 'react-hot-toast';
 import dynamic from 'next/dynamic';
@@ -38,6 +38,9 @@ export default function DoctorDashboard() {
   const [statusRequestType, setStatusRequestType] = useState<'ACTIVATE' | 'DEACTIVATE'>('DEACTIVATE');
   const [statusReason, setStatusReason] = useState('');
   const [statusLoading, setStatusLoading] = useState(false);
+  const [selectedRequest, setSelectedRequest] = useState<any>(null);
+  const [meetingLink, setMeetingLink] = useState('');
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
 
   const fetchDashboard = async () => {
     try {
@@ -147,12 +150,23 @@ export default function DoctorDashboard() {
     return () => { };
   }, [user, dashboardData?.doctor?._id, dashboardData?.alerts]);
 
-  const handleConfirmAppointment = async (id: string) => {
+  const handleConfirmAppointment = async (req: any) => {
+    if (req.appointmentType === 'ONLINE') {
+      setSelectedRequest(req);
+      setMeetingLink('');
+      setShowConfirmModal(true);
+    } else {
+      confirmRequest(req.id);
+    }
+  };
+
+  const confirmRequest = async (id: string, link?: string) => {
     try {
       setActionLoading(id);
-      const response = await apiClient.confirmAppointment(id);
+      const response = await apiClient.confirmAppointment(id, link);
       if (response.success) {
         toast.success('Appointment confirmed');
+        setShowConfirmModal(false);
         fetchDashboard();
       }
     } catch (err: any) {
@@ -199,6 +213,29 @@ export default function DoctorDashboard() {
     } finally {
       setDownloadingPatientId(null);
     }
+  };
+
+  // Calculate time remaining for request expiry (24 hours from creation)
+  const getTimeRemaining = (createdAt: string): { hours: number; minutes: number; isExpired: boolean } => {
+    const created = new Date(createdAt).getTime();
+    const now = new Date().getTime();
+    const expiryTime = created + 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+    const remaining = expiryTime - now;
+
+    if (remaining <= 0) {
+      return { hours: 0, minutes: 0, isExpired: true };
+    }
+
+    const hours = Math.floor(remaining / (60 * 60 * 1000));
+    const minutes = Math.floor((remaining % (60 * 60 * 1000)) / (60 * 1000));
+
+    return { hours, minutes, isExpired: false };
+  };
+
+  // Check if request is urgent (less than 2 hours remaining)
+  const isRequestUrgent = (createdAt: string): boolean => {
+    const { hours, minutes } = getTimeRemaining(createdAt);
+    return hours === 0 && minutes <= 120;
   };
 
   if (loading) {
@@ -263,7 +300,7 @@ export default function DoctorDashboard() {
               <div className="p-2.5 bg-emerald-100 rounded-xl group-hover:bg-emerald-200 transition-colors shadow-sm">
                 <Lock className="w-4 h-4 text-emerald-600" />
               </div>
-              Security Settings
+              Change Password
             </motion.button>
           </div>
 
@@ -274,6 +311,42 @@ export default function DoctorDashboard() {
               <p className="text-red-700 font-medium">{error}</p>
             </div>
           )}
+
+          {/* Appointment Status Overview */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8"
+          >
+            <Link href="/doctor/appointments?tab=requests">
+              <div className="glass-card p-6 border-white/40 hover:bg-white/60 transition-all cursor-pointer group">
+                <p className="text-slate-500 text-xs font-black uppercase tracking-widest mb-2">Pending Requests</p>
+                <p className="text-3xl font-black text-slate-800">{dashboardData?.pendingRequests?.length || 0}</p>
+                <p className="text-[10px] text-slate-400 mt-3 font-bold uppercase tracking-wide group-hover:text-slate-600">View Details →</p>
+              </div>
+            </Link>
+            <Link href="/doctor/appointments?tab=upcoming">
+              <div className="glass-card p-6 border-white/40 hover:bg-emerald-50/60 transition-all cursor-pointer group">
+                <p className="text-slate-500 text-xs font-black uppercase tracking-widest mb-2">Upcoming</p>
+                <p className="text-3xl font-black text-emerald-600">{dashboardData?.upcomingAppointments?.length || 0}</p>
+                <p className="text-[10px] text-slate-400 mt-3 font-bold uppercase tracking-wide group-hover:text-emerald-600">View Details →</p>
+              </div>
+            </Link>
+            <Link href="/doctor/appointments?tab=rescheduling">
+              <div className="glass-card p-6 border-white/40 hover:bg-cyan-50/60 transition-all cursor-pointer group">
+                <p className="text-slate-500 text-xs font-black uppercase tracking-widest mb-2">Rescheduling</p>
+                <p className="text-3xl font-black text-cyan-600">{dashboardData?.rescheduleRequests?.length || 0}</p>
+                <p className="text-[10px] text-slate-400 mt-3 font-bold uppercase tracking-wide group-hover:text-cyan-600">View Details →</p>
+              </div>
+            </Link>
+            <Link href="/doctor/appointments?tab=alerts">
+              <div className="glass-card p-6 border-white/40 hover:bg-red-50/60 transition-all cursor-pointer group">
+                <p className="text-slate-500 text-xs font-black uppercase tracking-widest mb-2">Critical Alerts</p>
+                <p className="text-3xl font-black text-red-600">{dashboardData?.stats?.emergencyAlertsCount || 0}</p>
+                <p className="text-[10px] text-slate-400 mt-3 font-bold uppercase tracking-wide group-hover:text-red-600">View Details →</p>
+              </div>
+            </Link>
+          </motion.div>
 
           {/* Stats Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -318,7 +391,7 @@ export default function DoctorDashboard() {
                   Consultation Activity
                 </h2>
               </div>
-              {weeklyActivity && weeklyActivity.length > 0 && weeklyActivity.some(d => d.appointments > 0) ? (
+              {weeklyActivity && (weeklyActivity as any[]).length > 0 && (weeklyActivity as any[]).some((d: any) => d.appointments > 0) ? (
                 <div className="h-[300px]">
                   <BarChartWrapper data={weeklyActivity} categoryKey="name" dataKey="appointments" layout="horizontal" />
                 </div>
@@ -344,7 +417,7 @@ export default function DoctorDashboard() {
                 </div>
                 Case Mix
               </h2>
-              {appointmentDistribution && appointmentDistribution.length > 0 && appointmentDistribution.some(d => d.value > 0) ? (
+              {appointmentDistribution && appointmentDistribution.length > 0 && appointmentDistribution.some((d: any) => d.value > 0) ? (
                 <div className="h-[300px]">
                   <PieChartWrapper data={appointmentDistribution} />
                 </div>
@@ -429,48 +502,57 @@ export default function DoctorDashboard() {
                 </h2>
                 {dashboardData?.pendingRequests && dashboardData.pendingRequests.length > 0 ? (
                   <div className="space-y-4">
-                    {dashboardData.pendingRequests.map((req: any) => (
-                      <div key={req.id} className="p-6 bg-amber-50/40 rounded-3xl border border-amber-100/50 hover:bg-amber-50/60 transition-all group">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-                          <div className="flex items-center gap-4">
-                            <div className="w-14 h-14 bg-gradient-to-br from-amber-100 to-orange-100 rounded-2xl flex items-center justify-center text-amber-700 font-black text-xl group-hover:scale-110 transition-transform duration-500 shadow-sm">
-                              {req.patientName?.charAt(0) || 'P'}
-                            </div>
-                            <div>
-                              <p className="font-black text-slate-800 text-lg leading-tight">{req.patientName || 'New Patient'}</p>
-                              <div className="flex flex-wrap items-center gap-3 mt-2">
-                                <span className="text-slate-500 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider bg-white/50 px-2 py-1 rounded-lg">
-                                  <Calendar className="w-3.5 h-3.5 text-amber-600" />
-                                  {new Date(req.scheduledTime).toLocaleDateString()}
-                                </span>
-                                <span className="text-slate-500 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider bg-white/50 px-2 py-1 rounded-lg">
-                                  <Clock className="w-3.5 h-3.5 text-amber-600" />
-                                  {new Date(req.scheduledTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                </span>
+                    {dashboardData.pendingRequests.map((req: any) => {
+                      const { hours, minutes, isExpired } = getTimeRemaining(req.createdAt || new Date().toISOString());
+                      const urgent = isRequestUrgent(req.createdAt || new Date().toISOString());
+                      return (
+                        <div key={req.id} className={`p-6 rounded-3xl border transition-all group ${isExpired ? 'bg-red-50/40 border-red-100/50' : urgent ? 'bg-red-50/30 border-red-200/60 animate-pulse' : 'bg-amber-50/40 border-amber-100/50 hover:bg-amber-50/60'}`}>
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+                            <div className="flex items-center gap-4 flex-1">
+                              <div className="w-14 h-14 bg-gradient-to-br from-amber-100 to-orange-100 rounded-2xl flex items-center justify-center text-amber-700 font-black text-xl group-hover:scale-110 transition-transform duration-500 shadow-sm">
+                                {req.patientName?.charAt(0) || 'P'}
+                              </div>
+                              <div className="flex-1">
+                                <p className="font-black text-slate-800 text-lg leading-tight">{req.patientName || 'New Patient'}</p>
+                                <div className="flex flex-wrap items-center gap-3 mt-2">
+                                  <span className="text-slate-500 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider bg-white/50 px-2 py-1 rounded-lg">
+                                    <Calendar className="w-3.5 h-3.5 text-amber-600" />
+                                    {new Date(req.scheduledTime).toLocaleDateString()}
+                                  </span>
+                                  <span className="text-slate-500 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider bg-white/50 px-2 py-1 rounded-lg">
+                                    <Clock className="w-3.5 h-3.5 text-amber-600" />
+                                    {new Date(req.scheduledTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                  {/* Expiry countdown */}
+                                  <span className={`flex items-center gap-1.5 text-xs font-black uppercase tracking-wider px-3 py-1 rounded-lg ${isExpired ? 'bg-red-100 text-red-700' : urgent ? 'bg-red-100 text-red-700 animate-pulse' : 'bg-amber-100 text-amber-700'}`}>
+                                    <AlertTriangle className="w-3.5 h-3.5" />
+                                    {isExpired ? 'Expired - Auto-cancelling' : `${hours}h ${minutes}m remaining`}
+                                  </span>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <button
-                              onClick={() => handleConfirmAppointment(req.id)}
-                              disabled={actionLoading === req.id}
-                              className="px-6 py-3 bg-emerald-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-xl shadow-emerald-600/20 active:scale-95 disabled:opacity-50"
-                            >
-                              {actionLoading === req.id ? <Loader className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-                              Confirm
-                            </button>
-                            <button
-                              onClick={() => handleCancelAppointment(req.id)}
-                              disabled={actionLoading === req.id}
-                              className="px-6 py-3 bg-white/80 text-slate-600 border border-slate-200 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-all flex items-center gap-2 shadow-sm active:scale-95 disabled:opacity-50"
-                            >
-                              <XCircle className="w-4 h-4" />
-                              Decline
-                            </button>
+                            <div className="flex items-center gap-3 flex-shrink-0">
+                              <button
+                                onClick={() => handleConfirmAppointment(req)}
+                                disabled={actionLoading === req.id || isExpired}
+                                className="px-6 py-3 bg-emerald-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-xl shadow-emerald-600/20 active:scale-95 disabled:opacity-50"
+                              >
+                                {actionLoading === req.id ? <Loader className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                                Confirm
+                              </button>
+                              <button
+                                onClick={() => handleCancelAppointment(req.id)}
+                                disabled={actionLoading === req.id || isExpired}
+                                className="px-6 py-3 bg-white/80 text-slate-600 border border-slate-200 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-all flex items-center gap-2 shadow-sm active:scale-95 disabled:opacity-50"
+                              >
+                                <XCircle className="w-4 h-4" />
+                                Decline
+                              </button>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="text-center py-16 bg-slate-50/30 rounded-3xl border border-dashed border-slate-200">
@@ -925,6 +1007,60 @@ export default function DoctorDashboard() {
           </motion.div>
         )}
       </AnimatePresence>
+      {/* Confirm Appointment Modal */}
+      {showConfirmModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[110] p-4 animate-in fade-in">
+          <div className="glass-card p-8 max-w-md w-full border-white/60 shadow-2xl animate-in zoom-in-95">
+            <div className="mb-6">
+              <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mb-4">
+                <Video size={24} />
+              </div>
+              <h3 className="text-2xl font-black text-slate-800 uppercase tracking-tight">
+                Online Consultation
+              </h3>
+              <p className="text-slate-500 text-sm mt-1 font-medium">
+                This is an online appointment. Please provide a meeting link for the patient.
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-black uppercase text-slate-400 mb-2">
+                  Meeting Link (Zoom/Meet)
+                </label>
+                <input
+                  type="text"
+                  value={meetingLink}
+                  onChange={(e) => setMeetingLink(e.target.value)}
+                  placeholder="https://..."
+                  className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all font-medium text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-8">
+              <button
+                onClick={() => {
+                  setShowConfirmModal(false);
+                  setMeetingLink('');
+                  setSelectedRequest(null);
+                }}
+                className="flex-1 py-3.5 bg-white border border-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-50 transition"
+                disabled={actionLoading === selectedRequest?.id}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => confirmRequest(selectedRequest.id, meetingLink)}
+                className="flex-1 py-3.5 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 transition shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2"
+                disabled={!meetingLink.trim() || actionLoading === selectedRequest?.id}
+              >
+                {actionLoading === selectedRequest?.id ? <Loader size={18} className="animate-spin" /> : 'Confirm'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </ProtectedLayout>
   );
 }

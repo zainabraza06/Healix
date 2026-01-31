@@ -20,11 +20,15 @@ import {
     requestAppointmentController,
     getPatientAppointmentsController,
     cancelPatientAppointmentController,
+    cancelRescheduleRequestedController,
+    handleRescheduleRejectionResponseController,
+    respondToDocCancelledRescheduleController,
     requestEmergencyCancellationController,
     processPaymentController,
     getAppointmentDetailsController,
     createCheckoutSessionController,
     verifyPaymentController,
+    rescheduleAppointmentByPatientController,
 } from '../controllers/appointmentController.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 import multer from 'multer';
@@ -58,9 +62,13 @@ router.get('/appointments/slots', getAvailableSlotsController);
 router.get('/appointments/verify-payment', verifyPaymentController);
 router.post('/appointments/book', requestAppointmentController);
 router.post('/appointments/:id/cancel', cancelPatientAppointmentController);
+router.post('/appointments/:id/cancel-reschedule-requested', cancelRescheduleRequestedController);
+router.post('/appointments/:id/reschedule-rejection-response', handleRescheduleRejectionResponseController);
+router.post('/appointments/:id/doctor-cancelled-reschedule-response', respondToDocCancelledRescheduleController);
 router.post('/appointments/:id/emergency-cancel', requestEmergencyCancellationController);
 router.post('/appointments/:id/checkout', createCheckoutSessionController);
 router.post('/appointments/:id/pay', processPaymentController);
+router.post('/appointments/:id/reschedule', rescheduleAppointmentByPatientController);
 router.get('/appointments/:id', getAppointmentDetailsController);
 
 export default router;

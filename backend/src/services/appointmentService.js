@@ -3,8 +3,9 @@ import Payment from '../models/Payment.js';
 import EmergencyCancellationRequest from '../models/EmergencyCancellationRequest.js';
 import Patient from '../models/Patient.js';
 import Doctor from '../models/Doctor.js';
-import { sendEmail } from '../config/email.js';
+import { sendEmail, sendEmailAsync } from '../config/email.js';
 import { getIO } from '../config/socket.js';
+import DoctorEmergencyRescheduleRequest from '../models/DoctorEmergencyRescheduleRequest.js';
 
 // Constants
 const APPOINTMENT_FEE = 1000;
@@ -18,9 +19,10 @@ const WORKING_HOURS = {
 };
 const MIN_BOOKING_DAYS_ADVANCE = 3;
 const MAX_BOOKING_DAYS_ADVANCE = 30; // Approx. 1 month
-const MIN_PATIENT_CANCEL_DAYS = 3;
-const MIN_DOCTOR_CANCEL_DAYS = 1;
+const MIN_PATIENT_CANCEL_HOURS = 24;
+const MIN_DOCTOR_CANCEL_HOURS = 24;
 const EMERGENCY_REVIEW_WINDOW_HOURS = 12;
+const PAYMENT_DEADLINE_DAYS = 1; // Auto-cancel CONFIRMED+PENDING if payment not done within 1 day of appointment
 
 /**
  * Generate a unique challan number
@@ -56,6 +58,12 @@ export const getAvailableSlots = async (doctorId, date) => {
 
     const endOfDay = new Date(queryDate);
     endOfDay.setHours(23, 59, 59, 999);
+
+    // Check if it's a weekend (Saturday = 6, Sunday = 0)
+    const dayOfWeek = queryDate.getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+        return [];
+    }
 
     // Get all booked appointments for this doctor on this date
     const bookedAppointments = await Appointment.find({
@@ -141,6 +149,14 @@ export const requestAppointment = async (patientId, doctorId, appointmentDate, s
 
     if (daysDiff > MAX_BOOKING_DAYS_ADVANCE) {
         const err = new Error(`Appointments cannot be booked more than ${MAX_BOOKING_DAYS_ADVANCE} days in advance`);
+        err.statusCode = 400;
+        throw err;
+    }
+
+    // Check if it's a weekend
+    const dayOfWeek = appointmentDateObj.getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+        const err = new Error('Appointments cannot be booked on weekends (Saturday/Sunday)');
         err.statusCode = 400;
         throw err;
     }
@@ -240,15 +256,66 @@ export const confirmAppointment = async (appointmentId, doctorId, meetingLink = 
         throw err;
     }
 
-    // Generate challan number
-    const challanNumber = generateChallanNumber();
-
     // Update appointment
     appointment.status = 'CONFIRMED';
-    appointment.challan_number = challanNumber;
     if (meetingLink) {
         appointment.meeting_link = meetingLink;
     }
+
+    // Check if this is a rescheduled appointment (has challan_number and PAID status)
+    const isRescheduledWithPayment = appointment.challan_number && appointment.payment_status === 'PAID';
+
+    if (isRescheduledWithPayment) {
+        // Rescheduled appointment with existing payment - auto-confirm
+        // Payment already exists and is PAID, so no new payment needed
+        // Clear reschedule rejection flags if any
+        appointment.reschedule_rejected = false;
+        appointment.reschedule_rejection_reason = undefined;
+        await appointment.save();
+
+        // Notify patient of confirmation
+        try {
+            const io = getIO();
+            io.to(`patient:${appointment.patient_id._id}`).emit('appointment:confirmed', {
+                appointmentId: appointment._id,
+                doctorName: appointment.doctor_id.user_id?.full_name,
+                newDate: appointment.appointment_date,
+            });
+        } catch (err) {
+            console.error('Socket emit failed:', err);
+        }
+
+        // Send confirmation email
+        try {
+            if (appointment.patient_id.user_id?.email) {
+                const content = `
+                    <p>Your rescheduled appointment has been confirmed!</p>
+                    <div class="info">
+                        <strong>Doctor:</strong> Dr. ${appointment.doctor_id.user_id?.full_name}<br/>
+                        <strong>Date:</strong> ${new Date(appointment.appointment_date).toLocaleDateString('en-US', { 
+                            year: 'numeric', 
+                            month: 'long', 
+                            day: 'numeric' 
+                        })}<br/>
+                        <strong>Time:</strong> ${appointment.slot_start_time} - ${appointment.slot_end_time}<br/>
+                        <strong>Type:</strong> ${appointment.appointment_type === 'ONLINE' ? 'Online Consultation' : 'In-Person'}<br/>
+                        ${appointment.appointment_type === 'ONLINE' ? `<strong>Meeting Link:</strong> ${appointment.meeting_link}<br/>` : ''}
+                        <strong>Payment:</strong> Already Paid (Rs. 1000) - No new payment needed
+                    </div>
+                `;
+                // Use async email (non-blocking)
+                sendEmailAsync(appointment.patient_id.user_id?.email, 'Appointment Confirmed - Rescheduled Slot', content);
+            }
+        } catch (err) {
+            console.error('Failed to send email:', err);
+        }
+
+        return appointment;
+    }
+
+    // For new appointments (no challan_number), create payment record
+    const challanNumber = generateChallanNumber();
+    appointment.challan_number = challanNumber;
     await appointment.save();
 
     // Create payment record
@@ -261,27 +328,27 @@ export const confirmAppointment = async (appointmentId, doctorId, meetingLink = 
         challan_number: challanNumber,
     });
 
-    // Notify patient via socket
-    try {
-        const io = getIO();
-        const patientUserId = appointment.patient_id.user_id?._id;
-        if (patientUserId) {
-            io.to(`user:${patientUserId}`).emit('appointment:confirmed', {
-                appointmentId: appointment._id,
-                challanNumber,
-                amount: APPOINTMENT_FEE,
-                meetingLink: appointment.meeting_link,
-            });
+        // Notify patient via socket
+        try {
+            const io = getIO();
+            const patientUserId = appointment.patient_id.user_id?._id;
+            if (patientUserId) {
+                io.to(`user:${patientUserId}`).emit('appointment:confirmed', {
+                    appointmentId: appointment._id,
+                    challanNumber,
+                    amount: APPOINTMENT_FEE,
+                    meetingLink: appointment.meeting_link,
+                });
+            }
+        } catch (err) {
+            console.error('Socket emit failed:', err);
         }
-    } catch (err) {
-        console.error('Socket emit failed:', err);
-    }
 
-    // Send confirmation email to patient
-    try {
-        const patientEmail = appointment.patient_id.user_id?.email;
-        if (patientEmail) {
-            const content = `
+        // Send confirmation email to patient (non-blocking)
+        try {
+            const patientEmail = appointment.patient_id.user_id?.email;
+            if (patientEmail) {
+                const content = `
         <p>Your appointment has been <strong style="color: green;">CONFIRMED</strong>!</p>
         <div class="success">
           <strong>Doctor:</strong> Dr. ${appointment.doctor_id.user_id?.full_name}<br/>
@@ -297,11 +364,12 @@ export const confirmAppointment = async (appointmentId, doctorId, meetingLink = 
           Please complete payment to confirm your appointment.
         </div>
       `;
-            await sendEmail(patientEmail, 'Appointment Confirmed - Payment Required', content);
+                // Use async email (non-blocking)
+                sendEmailAsync(patientEmail, 'Appointment Confirmed - Payment Required', content);
+            }
+        } catch (emailErr) {
+            console.error('Failed to queue confirmation email:', emailErr);
         }
-    } catch (emailErr) {
-        console.error('Failed to send confirmation email:', emailErr);
-    }
 
     // AUTO-CANCEL CONFLICTING REQUESTS
     try {
@@ -341,6 +409,78 @@ export const confirmAppointment = async (appointmentId, doctorId, meetingLink = 
     }
 
     return appointment;
+};
+
+/**
+ * Auto-cancel CONFIRMED appointments with PENDING payment when 1 day or less until appointment
+ */
+export const cancelUnpaidConfirmedAppointments = async () => {
+    try {
+        const now = new Date();
+        
+        // Find all CONFIRMED appointments with PENDING payment
+        const unpaidAppointments = await Appointment.find({
+            status: 'CONFIRMED',
+            payment_status: 'PENDING',
+        })
+            .populate({ path: 'patient_id', populate: { path: 'user_id' } })
+            .populate({ path: 'doctor_id', populate: { path: 'user_id' } });
+
+        let cancelledCount = 0;
+
+        for (const apt of unpaidAppointments) {
+            // Calculate hours remaining until appointment
+            const appointmentDateTime = new Date(apt.appointment_date);
+            const [hours, minutes] = apt.slot_start_time.split(':').map(Number);
+            appointmentDateTime.setHours(hours, minutes, 0, 0);
+            
+            const hoursRemaining = (appointmentDateTime - now) / (1000 * 60 * 60);
+
+            // Cancel if less than 24 hours remaining
+            if (hoursRemaining < 24) {
+                apt.status = 'CANCELLED';
+                apt.cancelled_by = 'SYSTEM';
+                apt.cancellation_reason = 'Payment not completed - less than 24 hours remaining';
+                apt.cancelled_at = new Date();
+                await apt.save();
+                cancelledCount++;
+
+                try {
+                    const patientEmail = apt.patient_id?.user_id?.email;
+                    const patientName = apt.patient_id?.user_id?.full_name;
+                    const doctorName = apt.doctor_id?.user_id?.full_name;
+                    
+                    if (patientEmail) {
+                        const content = `
+                            <p>Your appointment with <strong>Dr. ${doctorName}</strong> has been <strong style="color: red;">CANCELLED</strong>.</p>
+                            <div class="warning">
+                                <strong>Appointment Details:</strong><br/>
+                                Date: ${apt.appointment_date?.toDateString?.()}<br/>
+                                Time: ${apt.slot_start_time}
+                            </div>
+                            <div class="info">
+                                <strong>Reason for Cancellation:</strong> Payment was not completed.
+                            </div>
+                            <p>Your appointment was scheduled for less than 24 hours from now, and payment must be completed at least 24 hours in advance.</p>
+                            <p>Please book a new appointment if you still need to see the doctor.</p>
+                            <p>For more information, please contact support.</p>
+                        `;
+                        await sendEmail(patientEmail, 'Appointment Cancelled - Payment Not Completed', content);
+                        
+                        console.log(`[SCHEDULER] Cancelled unpaid appointment ${apt._id} for patient ${patientName} (${hoursRemaining.toFixed(2)} hours remaining)`);
+                    }
+                } catch (err) {
+                    console.error(`[SCHEDULER] Failed to send cancellation email for appointment ${apt._id}:`, err);
+                }
+            }
+        }
+        
+        console.log(`[SCHEDULER] Total unpaid appointments cancelled: ${cancelledCount}`);
+        return cancelledCount;
+    } catch (err) {
+        console.error('[SCHEDULER] cancelUnpaidConfirmedAppointments failed:', err);
+        throw err;
+    }
 };
 
 /**
@@ -390,6 +530,89 @@ export const cleanupExpiredRequests = async () => {
 };
 
 /**
+ * Reject rescheduled appointment (Doctor rejects patient's reschedule request)
+ * Patient can then either keep original slot or cancel with partial refund
+ */
+export const rejectRescheduledAppointment = async (appointmentId, doctorId, reason) => {
+    const appointment = await Appointment.findById(appointmentId)
+        .populate({ path: 'patient_id', populate: { path: 'user_id' } })
+        .populate({ path: 'doctor_id', populate: { path: 'user_id' } });
+
+    if (!appointment) {
+        const err = new Error('Appointment not found');
+        err.statusCode = 404;
+        throw err;
+    }
+
+    if (appointment.doctor_id._id.toString() !== doctorId.toString()) {
+        const err = new Error('Unauthorized');
+        err.statusCode = 403;
+        throw err;
+    }
+
+    if (appointment.status !== 'REQUESTED') {
+        const err = new Error('Only requested appointments can be rejected');
+        err.statusCode = 400;
+        throw err;
+    }
+
+    // Check if this was a rescheduled appointment (has challan number from original)
+    if (!appointment.challan_number) {
+        const err = new Error('This is not a rescheduled appointment');
+        err.statusCode = 400;
+        throw err;
+    }
+
+    // Store original appointment date/time to revert if needed
+    const originalDate = appointment.appointment_date;
+    const originalTime = appointment.slot_start_time;
+
+    // Set a flag that this was rejected - patient will get options
+    appointment.reschedule_rejected = true;
+    appointment.reschedule_rejection_reason = reason;
+    // Keep status as REQUESTED to show in patient's requests tab with special handling
+    await appointment.save();
+
+    // Notify patient
+    try {
+        const io = getIO();
+        const patientUserId = appointment.patient_id.user_id?._id;
+        if (patientUserId) {
+            io.to(`user:${patientUserId}`).emit('reschedule:rejected', {
+                appointmentId: appointment._id,
+                doctorName: appointment.doctor_id.user_id?.full_name,
+                reason,
+            });
+        }
+    } catch (err) {
+        console.error('Socket emit failed:', err);
+    }
+
+    // Send notification email to patient
+    try {
+        if (appointment.patient_id.user_id?.email) {
+            const content = `
+                <p>Your appointment reschedule request has been <strong style="color: orange;">DECLINED</strong> by Dr. ${appointment.doctor_id.user_id?.full_name}.</p>
+                <div class="warning">
+                    <strong>Reason:</strong> ${reason}
+                </div>
+                <p><strong>Your options:</strong></p>
+                <ul>
+                    <li><strong>Keep Original Slot:</strong> Your appointment remains on the original date/time (${new Date(originalDate).toDateString()} at ${originalTime})</li>
+                    <li><strong>Cancel:</strong> Cancel the appointment and receive Rs. 750 refund (Rs. 250 cancellation fee deducted from Rs. 1000)</li>
+                </ul>
+                <p>Please log in to your dashboard to choose an option.</p>
+            `;
+            await sendEmail(appointment.patient_id.user_id.email, 'Appointment Reschedule Declined', content);
+        }
+    } catch (err) {
+        console.error('Failed to send email:', err);
+    }
+
+    return appointment;
+};
+
+/**
  * Process payment for an appointment (MOCK/DEMO MODE for CV projects)
  * Simulates instant payment confirmation - no real payment gateway
  */
@@ -429,6 +652,110 @@ export const processPayment = async (appointmentId, patientId) => {
 };
 
 /**
+ * Handle patient's response to rejected reschedule (keep original or cancel)
+ */
+export const handleRescheduleRejectionResponse = async (appointmentId, patientId, action, reason = '') => {
+    const appointment = await Appointment.findById(appointmentId)
+        .populate({ path: 'patient_id', populate: { path: 'user_id' } })
+        .populate({ path: 'doctor_id', populate: { path: 'user_id' } });
+
+    if (!appointment) {
+        const err = new Error('Appointment not found');
+        err.statusCode = 404;
+        throw err;
+    }
+
+    if (appointment.patient_id._id.toString() !== patientId.toString()) {
+        const err = new Error('Unauthorized');
+        err.statusCode = 403;
+        throw err;
+    }
+
+    if (!appointment.reschedule_rejected) {
+        const err = new Error('This appointment does not have a rejected reschedule');
+        err.statusCode = 400;
+        throw err;
+    }
+
+    if (action === 'keep_original') {
+        // Revert to original appointment details - they're already stored in the document
+        // Just mark as confirmed again and clear the rejection flag
+        appointment.reschedule_rejected = false;
+        appointment.reschedule_rejection_reason = null;
+        appointment.status = 'CONFIRMED';
+        appointment.payment_status = 'PAID';
+        await appointment.save();
+
+        // Notify doctor
+        try {
+            if (appointment.doctor_id.user_id?.email) {
+                const content = `
+                    <p>Patient <strong>${appointment.patient_id.user_id?.full_name}</strong> has chosen to keep their original appointment slot.</p>
+                    <div class="success">
+                        <strong>Date:</strong> ${appointment.appointment_date.toDateString()}<br/>
+                        <strong>Time:</strong> ${appointment.slot_start_time}
+                    </div>
+                `;
+                await sendEmail(appointment.doctor_id.user_id.email, 'Patient Kept Original Appointment', content);
+            }
+        } catch (err) {
+            console.error('Failed to send email:', err);
+        }
+
+        return { appointment, message: 'Original appointment confirmed' };
+    }
+
+    if (action === 'cancel') {
+        // Cancel with partial refund (Rs. 250 deduction)
+        let refundAmount = 0;
+        if (appointment.payment_status === 'PAID') {
+            refundAmount = APPOINTMENT_FEE - CANCELLATION_DEDUCTION; // 750
+            appointment.refund_amount = refundAmount;
+            appointment.payment_status = 'PARTIAL_REFUND';
+
+            await Payment.create({
+                appointment_id: appointment._id,
+                patient_id: patientId,
+                amount: refundAmount,
+                type: 'REFUND',
+                status: 'COMPLETED',
+                challan_number: `REF-${appointment.challan_number}`,
+                refund_reason: `Patient cancelled after reschedule rejection: ${reason}`,
+                refund_initiated_by: 'PATIENT',
+            });
+        }
+
+        appointment.status = 'CANCELLED';
+        appointment.cancelled_by = 'PATIENT';
+        appointment.cancellation_reason = reason || 'Cancelled after reschedule rejection';
+        appointment.cancelled_at = new Date();
+        appointment.reschedule_rejected = false;
+        await appointment.save();
+
+        // Notify doctor
+        try {
+            if (appointment.doctor_id.user_id?.email) {
+                const content = `
+                    <p>Patient <strong>${appointment.patient_id.user_id?.full_name}</strong> has cancelled their appointment after reschedule rejection.</p>
+                    <div class="info">
+                        <strong>Refund:</strong> Rs. ${refundAmount} (Rs. 250 cancellation fee deducted)
+                    </div>
+                `;
+                await sendEmail(appointment.doctor_id.user_id.email, 'Patient Cancelled Appointment', content);
+            }
+        } catch (err) {
+            console.error('Failed to send email:', err);
+        }
+
+        return { appointment, refundAmount, message: 'Appointment cancelled with partial refund' };
+    }
+
+    const err = new Error('Invalid action. Must be "keep_original" or "cancel"');
+    err.statusCode = 400;
+    throw err;
+};
+
+/**
  * Cancel appointment by patient
  */
 export const cancelAppointmentByPatient = async (appointmentId, patientId, reason) => {
@@ -448,14 +775,42 @@ export const cancelAppointmentByPatient = async (appointmentId, patientId, reaso
         throw err;
     }
 
-    // Requested appointments can always be cancelled
+    // Patient can cancel REQUESTED appointments (withdraw request) - no payment involved
     if (appointment.status === 'REQUESTED') {
         appointment.status = 'CANCELLED';
         appointment.cancelled_by = 'PATIENT';
         appointment.cancellation_reason = reason;
         appointment.cancelled_at = new Date();
         await appointment.save();
-        return { appointment, refundAmount: 0, canCancel: true };
+
+        // Notify doctor
+        try {
+            const io = getIO();
+            io.to(`doctor:${appointment.doctor_id._id}`).emit('appointment:cancelled', {
+                appointmentId: appointment._id,
+                patientName: appointment.patient_id.user_id?.full_name,
+                cancelledBy: 'PATIENT',
+                reason,
+            });
+        } catch (err) {
+            console.error('Socket emit failed:', err);
+        }
+
+        try {
+            if (appointment.doctor_id.user_id?.email) {
+                const content = `
+                    <p>Patient <strong>${appointment.patient_id.user_id?.full_name}</strong> has withdrawn their appointment request.</p>
+                    <div class="info">
+                        <strong>Reason:</strong> ${reason}
+                    </div>
+                `;
+                await sendEmail(appointment.doctor_id.user_id?.email, 'Appointment Request Withdrawn', content);
+            }
+        } catch (err) {
+            console.error('Failed to send email:', err);
+        }
+
+        return { appointment, refundAmount: 0 };
     }
 
     if (appointment.status !== 'CONFIRMED') {
@@ -464,22 +819,23 @@ export const cancelAppointmentByPatient = async (appointmentId, patientId, reaso
         throw err;
     }
 
-    // Check if more than 3 days remaining
+    // Check if more than 24 hours remaining
     const now = new Date();
     const appointmentDateTime = new Date(appointment.appointment_date);
-    const daysDiff = Math.ceil((appointmentDateTime - now) / (1000 * 60 * 60 * 24));
+    const hoursDiff = (appointmentDateTime - now) / (1000 * 60 * 60);
 
-    if (daysDiff < MIN_PATIENT_CANCEL_DAYS) {
-        const err = new Error(`Cannot cancel appointment with less than ${MIN_PATIENT_CANCEL_DAYS} days remaining. Please request emergency cancellation.`);
+    // Logic 6: Patient CANNOT cancel if less than 24 hours remaining, NO emergency cancellation option
+    if (hoursDiff < MIN_PATIENT_CANCEL_HOURS) {
+        const err = new Error(`Cannot cancel appointment with less than ${MIN_PATIENT_CANCEL_HOURS} hours remaining.`);
         err.statusCode = 400;
-        err.needsEmergencyCancellation = true;
         throw err;
     }
 
     // Calculate refund
+    // Logic 6: Deduct 250 from charges, refund 750 (total fee is 1000)
     let refundAmount = 0;
     if (appointment.payment_status === 'PAID') {
-        refundAmount = APPOINTMENT_FEE - CANCELLATION_DEDUCTION;
+        refundAmount = APPOINTMENT_FEE - CANCELLATION_DEDUCTION; // 1000 - 250 = 750
         appointment.refund_amount = refundAmount;
         appointment.payment_status = 'PARTIAL_REFUND';
 
@@ -533,6 +889,35 @@ export const cancelAppointmentByPatient = async (appointmentId, patientId, reaso
         console.error('Failed to send cancellation email:', emailErr);
     }
 
+    // Send refund confirmation email to patient (if paid)
+    if (appointment.payment_status === 'PARTIAL_REFUND' && refundAmount > 0) {
+        try {
+            if (appointment.patient_id.user_id?.email) {
+                const content = `
+                    <p>Your appointment has been <strong style="color: red;">CANCELLED</strong> successfully.</p>
+                    <div class="success">
+                        <strong>Doctor:</strong> Dr. ${appointment.doctor_id.user_id?.full_name}<br/>
+                        <strong>Date:</strong> ${appointment.appointment_date.toDateString()}<br/>
+                        <strong>Time:</strong> ${appointment.slot_start_time} - ${appointment.slot_end_time}
+                    </div>
+                    <div class="info">
+                        <h3 style="color: green;">Refund Details</h3>
+                        <strong>Original Payment:</strong> Rs. 1,000<br/>
+                        <strong>Refund Amount:</strong> Rs. ${refundAmount.toLocaleString()}<br/>
+                        <strong>Deduction:</strong> Rs. 250 (Cancellation fee)<br/>
+                        <strong>Challan Number:</strong> ${appointment.challan_number}<br/>
+                        <strong>Refund Status:</strong> Processed
+                    </div>
+                    <p>The refund will be credited to your original payment method within 5-7 business days.</p>
+                    <p>If you have any questions, please contact support.</p>
+                `;
+                await sendEmail(appointment.patient_id.user_id?.email, 'Appointment Cancelled - Refund Processed', content);
+            }
+        } catch (err) {
+            console.error('Failed to send patient refund email:', err);
+        }
+    }
+
     return { appointment, refundAmount, canCancel: true };
 };
 
@@ -556,26 +941,409 @@ export const cancelAppointmentByDoctor = async (appointmentId, doctorId, reason)
         throw err;
     }
 
-    if (!['REQUESTED', 'CONFIRMED'].includes(appointment.status)) {
-        const err = new Error('Only requested or confirmed appointments can be cancelled');
+    if (!['REQUESTED', 'CONFIRMED', 'RESCHEDULE_REQUESTED'].includes(appointment.status)) {
+        const err = new Error('Only requested, confirmed, or reschedule-requested appointments can be cancelled');
         err.statusCode = 400;
         throw err;
     }
 
-    // Check if more than 1 day remaining for confirmed appointments
+    // Logic for RESCHEDULE_REQUESTED: Patient gets option to keep original slot or cancel with deduction
+    if (appointment.status === 'RESCHEDULE_REQUESTED') {
+        // Store the cancellation request but DON'T change status yet
+        // Set a flag that patient needs to choose
+        appointment.doctor_cancelled_reschedule_request = true;
+        appointment.doctor_cancellation_reason = reason;
+        appointment.doctor_cancelled_at = new Date();
+        await appointment.save();
+
+        try {
+            const io = getIO();
+            const patientUserId = appointment.patient_id.user_id?._id;
+            const patientId = appointment.patient_id._id;
+            
+            if (patientUserId) {
+                io.to(`user:${patientUserId}`).emit('reschedule:doctor_cancelled', {
+                    appointmentId: appointment._id,
+                    doctorName: appointment.doctor_id.user_id?.full_name,
+                    reason,
+                    requiresPatientChoice: true,
+                });
+            }
+            
+            if (patientId) {
+                io.to(`patient:${patientId}`).emit('reschedule:doctor_cancelled', {
+                    appointmentId: appointment._id,
+                    doctorName: appointment.doctor_id.user_id?.full_name,
+                    reason,
+                    requiresPatientChoice: true,
+                });
+            }
+        } catch (err) {
+            console.error('Socket emit failed:', err);
+        }
+
+        // Send email to patient with options
+        sendEmailAsync(
+            appointment.patient_id.user_id?.email,
+            'Doctor Cancelled Reschedule Request - Action Required',
+            `
+                <p>Dr. ${appointment.doctor_id.user_id?.full_name} has cancelled the reschedule request for your appointment.</p>
+                <div class="warning">
+                    <strong>Reason:</strong> ${reason}
+                </div>
+                <div class="info">
+                    <h3>You have two options:</h3>
+                    <strong>Option 1: Keep Original Slot</strong>
+                    <p>Return to your original appointment date and time without any changes.</p>
+                    <strong>Original Appointment:</strong> ${appointment.appointment_date.toDateString()} at ${appointment.slot_start_time}<br/>
+                    
+                    <strong>Option 2: Cancel Completely</strong>
+                    <p>Cancel the appointment entirely. If you paid, a refund will be issued with a deduction fee.</p>
+                    <strong>Refund Amount:</strong> Rs. 750 (after Rs. 250 deduction)<br/>
+                </div>
+                <p>Please respond through the app to confirm your choice.</p>
+            `
+        );
+
+        return { appointment, requiresPatientChoice: true };
+    }
+
+    // Check if less than 24 hours remaining for CONFIRMED appointments
     if (appointment.status === 'CONFIRMED') {
+        // Doctor CANNOT cancel CONFIRMED+PAID appointments - only reschedule
+        if (appointment.payment_status === 'PAID') {
+            const err = new Error('Cannot cancel paid confirmed appointments. Please use the Reschedule option instead.');
+            err.statusCode = 400;
+            err.canOnlyReschedule = true;
+            throw err;
+        }
+
         const now = new Date();
         const appointmentDateTime = new Date(appointment.appointment_date);
-        const daysDiff = Math.ceil((appointmentDateTime - now) / (1000 * 60 * 60 * 24));
+        const hoursDiff = (appointmentDateTime - now) / (1000 * 60 * 60);
 
-        if (daysDiff < MIN_DOCTOR_CANCEL_DAYS) {
-            const err = new Error(`Cannot cancel appointment with less than ${MIN_DOCTOR_CANCEL_DAYS} day remaining`);
+        if (hoursDiff < MIN_DOCTOR_CANCEL_HOURS) {
+            // Logic 4: Doctor CANNOT cancel if less than 24 hours. Must request emergency via admin.
+            const err = new Error(`Cannot cancel appointment with less than ${MIN_DOCTOR_CANCEL_HOURS} hours remaining. Please request emergency reschedule via admin.`);
             err.statusCode = 400;
+            err.canRequestEmergencyReschedule = true;
             throw err;
         }
     }
 
-    // Full refund for doctor cancellation
+    // Logic 1: REQUESTED appointment cancellation = PERMANENT CANCEL
+    if (appointment.status === 'REQUESTED') {
+        appointment.status = 'CANCELLED';
+        appointment.cancelled_by = 'DOCTOR';
+        appointment.cancellation_reason = reason;
+        appointment.cancelled_at = new Date();
+        await appointment.save();
+
+        // Notify patient via socket - try multiple event channels
+        try {
+            const io = getIO();
+            const patientUserId = appointment.patient_id.user_id?._id;
+            const patientId = appointment.patient_id._id;
+            
+            if (patientUserId) {
+                io.to(`user:${patientUserId}`).emit('appointment:cancelled', {
+                    appointmentId: appointment._id,
+                    doctorName: appointment.doctor_id.user_id?.full_name,
+                    cancelledBy: 'DOCTOR',
+                    reason,
+                    refundAmount: 0,
+                });
+            }
+            
+            // Also emit to patient-scoped room
+            if (patientId) {
+                io.to(`patient:${patientId}`).emit('appointment:cancelled', {
+                    appointmentId: appointment._id,
+                    doctorName: appointment.doctor_id.user_id?.full_name,
+                    cancelledBy: 'DOCTOR',
+                    reason,
+                    refundAmount: 0,
+                });
+            }
+            
+            console.log(`[SOCKET] Appointment cancellation notification sent to patient ${patientUserId}`);
+        } catch (err) {
+            console.error('Socket emit failed:', err);
+        }
+
+        // Send email asynchronously
+        sendEmailAsync(
+            appointment.patient_id.user_id?.email,
+            'Appointment Request Cancelled by Doctor',
+            `
+                <p>Your appointment request has been cancelled by the doctor.</p>
+                <div class="warning">
+                    <strong>Doctor:</strong> Dr. ${appointment.doctor_id.user_id?.full_name}<br/>
+                    <strong>Date:</strong> ${appointment.appointment_date.toDateString()}<br/>
+                    <strong>Reason:</strong> ${reason}
+                </div>
+                <p>No refund is applicable for cancelled requests.</p>
+            `
+        );
+
+        return { appointment, refundAmount: 0, requiresRescheduleSelection: false };
+    }
+
+    // CONFIRMED + UNPAID appointment cancellation
+    if (appointment.status === 'CONFIRMED' && appointment.payment_status !== 'PAID') {
+        // Logic 2: CONFIRMED + UNPAID = Permanently cancel
+        appointment.status = 'CANCELLED';
+        appointment.cancelled_by = 'DOCTOR';
+        appointment.cancellation_reason = reason;
+            appointment.cancelled_at = new Date();
+            await appointment.save();
+
+            // Notify patient via socket - try multiple event channels
+            try {
+                const io = getIO();
+                const patientUserId = appointment.patient_id.user_id?._id;
+                const patientId = appointment.patient_id._id;
+                
+                if (patientUserId) {
+                    io.to(`user:${patientUserId}`).emit('appointment:cancelled', {
+                        appointmentId: appointment._id,
+                        doctorName: appointment.doctor_id.user_id?.full_name,
+                        cancelledBy: 'DOCTOR',
+                        reason,
+                        refundAmount: 0,
+                    });
+                }
+                
+                // Also emit to patient-scoped room
+                if (patientId) {
+                    io.to(`patient:${patientId}`).emit('appointment:cancelled', {
+                        appointmentId: appointment._id,
+                        doctorName: appointment.doctor_id.user_id?.full_name,
+                        cancelledBy: 'DOCTOR',
+                        reason,
+                        refundAmount: 0,
+                    });
+                }
+                
+                console.log(`[SOCKET] Appointment cancellation notification sent to patient ${patientUserId}`);
+            } catch (err) {
+                console.error('Socket emit failed:', err);
+            }
+
+            // Send email asynchronously
+            sendEmailAsync(
+                appointment.patient_id.user_id?.email,
+                'Appointment Cancelled by Doctor',
+                `
+                    <p>Your appointment has been cancelled by the doctor.</p>
+                    <div class="warning">
+                        <strong>Doctor:</strong> Dr. ${appointment.doctor_id.user_id?.full_name}<br/>
+                        <strong>Date:</strong> ${appointment.appointment_date.toDateString()}<br/>
+                        <strong>Reason:</strong> ${reason}
+                    </div>
+                    <p>No refund is applicable as payment was pending.</p>
+                `
+            );
+
+            return { appointment, refundAmount: 0, requiresRescheduleSelection: false };
+        }
+    }
+
+/**
+ * Patient responds to doctor's cancellation of reschedule request
+ * Patient can either: keep original slot (CONFIRMED) or cancel with deduction (CANCELLED + PARTIAL_REFUND)
+ */
+export const respondToDocCancelledReschedule = async (appointmentId, patientId, choice, reason) => {
+    const appointment = await Appointment.findById(appointmentId)
+        .populate({ path: 'patient_id', populate: { path: 'user_id' } })
+        .populate({ path: 'doctor_id', populate: { path: 'user_id' } });
+
+    if (!appointment) {
+        const err = new Error('Appointment not found');
+        err.statusCode = 404;
+        throw err;
+    }
+
+    if (appointment.patient_id._id.toString() !== patientId.toString()) {
+        const err = new Error('Unauthorized');
+        err.statusCode = 403;
+        throw err;
+    }
+
+    if (appointment.status !== 'RESCHEDULE_REQUESTED' || !appointment.doctor_cancelled_reschedule_request) {
+        const err = new Error('This appointment is not waiting for your response');
+        err.statusCode = 400;
+        throw err;
+    }
+
+    // Choice 1: Keep original slot - restore CONFIRMED status
+    if (choice === 'keep') {
+        appointment.status = 'CONFIRMED';
+        appointment.doctor_cancelled_reschedule_request = false;
+        await appointment.save();
+
+        try {
+            const io = getIO();
+            const patientUserId = appointment.patient_id.user_id?._id;
+            const patientId = appointment.patient_id._id;
+            
+            if (patientUserId) {
+                io.to(`user:${patientUserId}`).emit('appointment:confirmed', {
+                    appointmentId: appointment._id,
+                    message: 'Appointment confirmed for original slot',
+                });
+            }
+            
+            if (patientId) {
+                io.to(`patient:${patientId}`).emit('appointment:confirmed', {
+                    appointmentId: appointment._id,
+                    message: 'Appointment confirmed for original slot',
+                });
+            }
+        } catch (err) {
+            console.error('Socket emit failed:', err);
+        }
+
+        sendEmailAsync(
+            appointment.patient_id.user_id?.email,
+            'Appointment Confirmed - Original Slot',
+            `
+                <p>Your appointment has been confirmed for the original slot.</p>
+                <div class="success">
+                    <strong>Doctor:</strong> Dr. ${appointment.doctor_id.user_id?.full_name}<br/>
+                    <strong>Date:</strong> ${appointment.appointment_date.toDateString()}<br/>
+                    <strong>Time:</strong> ${appointment.slot_start_time} - ${appointment.slot_end_time}
+                </div>
+                <p>No changes have been made to your appointment.</p>
+            `
+        );
+
+        return { appointment, action: 'kept' };
+    }
+
+    // Choice 2: Cancel completely - apply deduction if paid
+    if (choice === 'cancel') {
+        let refundAmount = 0;
+        if (appointment.payment_status === 'PAID') {
+            refundAmount = APPOINTMENT_FEE - CANCELLATION_DEDUCTION; // 1000 - 250 = 750
+            appointment.refund_amount = refundAmount;
+            appointment.payment_status = 'PARTIAL_REFUND';
+
+            await Payment.create({
+                appointment_id: appointment._id,
+                patient_id: patientId,
+                amount: refundAmount,
+                type: 'REFUND',
+                status: 'COMPLETED',
+                challan_number: `REF-${appointment.challan_number}`,
+                refund_reason: `Patient chose to cancel after doctor cancelled reschedule request: ${reason}`,
+                refund_initiated_by: 'PATIENT',
+            });
+        }
+
+        appointment.status = 'CANCELLED';
+        appointment.cancelled_by = 'PATIENT';
+        appointment.cancellation_reason = reason;
+        appointment.cancelled_at = new Date();
+        appointment.doctor_cancelled_reschedule_request = false;
+        await appointment.save();
+
+        try {
+            const io = getIO();
+            const patientUserId = appointment.patient_id.user_id?._id;
+            const patientId = appointment.patient_id._id;
+            
+            if (patientUserId) {
+                io.to(`user:${patientUserId}`).emit('appointment:cancelled', {
+                    appointmentId: appointment._id,
+                    refundAmount,
+                    reason,
+                });
+            }
+            
+            if (patientId) {
+                io.to(`patient:${patientId}`).emit('appointment:cancelled', {
+                    appointmentId: appointment._id,
+                    refundAmount,
+                    reason,
+                });
+            }
+        } catch (err) {
+            console.error('Socket emit failed:', err);
+        }
+
+        sendEmailAsync(
+            appointment.patient_id.user_id?.email,
+            'Appointment Cancelled - Refund Processed',
+            `
+                <p>Your appointment has been <strong style="color: red;">CANCELLED</strong>.</p>
+                <div class="warning">
+                    <strong>Doctor:</strong> Dr. ${appointment.doctor_id.user_id?.full_name}<br/>
+                    <strong>Date:</strong> ${appointment.appointment_date.toDateString()}<br/>
+                    <strong>Reason:</strong> ${reason}
+                </div>
+                <div class="info">
+                    <h3 style="color: green;">Refund Details</h3>
+                    <strong>Original Payment:</strong> Rs. 1,000<br/>
+                    <strong>Refund Amount:</strong> Rs. ${refundAmount.toLocaleString()}<br/>
+                    <strong>Deduction:</strong> Rs. 250 (Cancellation fee)<br/>
+                    <strong>Challan Number:</strong> ${appointment.challan_number}<br/>
+                    <strong>Refund Status:</strong> Processed
+                </div>
+                <p>The refund will be credited to your original payment method within 5-7 business days.</p>
+            `
+        );
+
+        // Notify doctor
+        try {
+            if (appointment.doctor_id.user_id?.email) {
+                const content = `
+                    <p>Patient <strong>${appointment.patient_id.user_id?.full_name}</strong> cancelled their appointment after your reschedule cancellation.</p>
+                    <div class="info">
+                        <strong>Reason:</strong> ${reason}
+                    </div>
+                `;
+                await sendEmail(appointment.doctor_id.user_id?.email, 'Patient Cancelled Appointment', content);
+            }
+        } catch (err) {
+            console.error('Failed to send email to doctor:', err);
+        }
+
+        return { appointment, action: 'cancelled', refundAmount };
+    }
+
+    const err = new Error('Invalid choice. Must be "keep" or "cancel"');
+    err.statusCode = 400;
+    throw err;
+};
+
+/**
+ * Cancel RESCHEDULE_REQUESTED appointment (Patient) - with full refund
+ */
+export const cancelRescheduleRequestedByPatient = async (appointmentId, patientId, reason) => {
+    const appointment = await Appointment.findById(appointmentId)
+        .populate({ path: 'patient_id', populate: { path: 'user_id' } })
+        .populate({ path: 'doctor_id', populate: { path: 'user_id' } });
+
+    if (!appointment) {
+        const err = new Error('Appointment not found');
+        err.statusCode = 404;
+        throw err;
+    }
+
+    if (appointment.patient_id._id.toString() !== patientId.toString()) {
+        const err = new Error('Unauthorized');
+        err.statusCode = 403;
+        throw err;
+    }
+
+    if (appointment.status !== 'RESCHEDULE_REQUESTED') {
+        const err = new Error('Only reschedule-requested appointments can be cancelled from this option');
+        err.statusCode = 400;
+        throw err;
+    }
+
+    // Full refund since doctor initiated the reschedule request
     let refundAmount = 0;
     if (appointment.payment_status === 'PAID') {
         refundAmount = APPOINTMENT_FEE;
@@ -584,59 +1352,75 @@ export const cancelAppointmentByDoctor = async (appointmentId, doctorId, reason)
 
         await Payment.create({
             appointment_id: appointment._id,
-            patient_id: appointment.patient_id._id,
+            patient_id: patientId,
             amount: refundAmount,
             type: 'REFUND',
             status: 'COMPLETED',
             challan_number: `REF-${appointment.challan_number}`,
-            refund_reason: `Doctor cancelled: ${reason}`,
-            refund_initiated_by: 'DOCTOR',
+            refund_reason: `Patient cancelled after doctor reschedule request: ${reason}`,
+            refund_initiated_by: 'PATIENT',
         });
     }
 
     appointment.status = 'CANCELLED';
-    appointment.cancelled_by = 'DOCTOR';
+    appointment.cancelled_by = 'PATIENT';
     appointment.cancellation_reason = reason;
     appointment.cancelled_at = new Date();
     await appointment.save();
 
-    // Notify patient
+    // Notify doctor
     try {
         const io = getIO();
-        const patientUserId = appointment.patient_id.user_id?._id;
-        if (patientUserId) {
-            io.to(`user:${patientUserId}`).emit('appointment:cancelled', {
-                appointmentId: appointment._id,
-                doctorName: appointment.doctor_id.user_id?.full_name,
-                cancelledBy: 'DOCTOR',
-                reason,
-                refundAmount,
-            });
-        }
+        io.to(`doctor:${appointment.doctor_id._id}`).emit('appointment:cancelled', {
+            appointmentId: appointment._id,
+            patientName: appointment.patient_id.user_id?.full_name,
+            cancelledBy: 'PATIENT',
+            reason,
+        });
     } catch (err) {
         console.error('Socket emit failed:', err);
     }
 
-    // Send cancellation email to patient
+    try {
+        if (appointment.doctor_id.user_id?.email) {
+            const content = `
+                <p>Patient <strong>${appointment.patient_id.user_id?.full_name}</strong> has cancelled their appointment and declined to reschedule.</p>
+                <div class="info">
+                    <strong>Reason:</strong> ${reason}
+                </div>
+                <p>Full refund of Rs. ${refundAmount} has been issued to the patient.</p>
+            `;
+            await sendEmail(appointment.doctor_id.user_id?.email, 'Appointment Cancelled by Patient', content);
+        }
+    } catch (err) {
+        console.error('Failed to send email:', err);
+    }
+
+    // Send refund confirmation email to patient
     try {
         if (appointment.patient_id.user_id?.email) {
             const content = `
-        <p>Your appointment has been cancelled by the doctor.</p>
-        <div class="warning">
-          <strong>Doctor:</strong> Dr. ${appointment.doctor_id.user_id?.full_name}<br/>
-          <strong>Date:</strong> ${appointment.appointment_date.toDateString()}<br/>
-          <strong>Reason:</strong> ${reason}
-        </div>
-        ${refundAmount > 0 ? `
-          <div class="success">
-            <strong>Full Refund:</strong> Rs. ${refundAmount} will be credited to your account.
-          </div>
-        ` : ''}
-      `;
-            await sendEmail(appointment.patient_id.user_id.email, 'Appointment Cancelled by Doctor', content);
+                <p>Your appointment has been <strong style="color: red;">CANCELLED</strong> successfully.</p>
+                <div class="success">
+                    <strong>Doctor:</strong> Dr. ${appointment.doctor_id.user_id?.full_name}<br/>
+                    <strong>Original Date:</strong> ${appointment.appointment_date.toDateString()}<br/>
+                    <strong>Original Time:</strong> ${appointment.slot_start_time} - ${appointment.slot_end_time}
+                </div>
+                <div class="info">
+                    <h3 style="color: green;">Refund Details</h3>
+                    <strong>Original Payment:</strong> Rs. 1,000<br/>
+                    <strong>Refund Amount:</strong> Rs. ${refundAmount.toLocaleString()}<br/>
+                    <strong>Deduction:</strong> Rs. 0 (No cancellation fee - Doctor initiated)<br/>
+                    <strong>Challan Number:</strong> ${appointment.challan_number}<br/>
+                    <strong>Refund Status:</strong> Processed
+                </div>
+                <p>The refund will be credited to your original payment method within 5-7 business days.</p>
+                <p>If you have any questions, please contact support.</p>
+            `;
+            await sendEmail(appointment.patient_id.user_id?.email, 'Appointment Cancelled - Refund Processed', content);
         }
-    } catch (emailErr) {
-        console.error('Failed to send cancellation email:', emailErr);
+    } catch (err) {
+        console.error('Failed to send patient refund email:', err);
     }
 
     return { appointment, refundAmount };
@@ -645,53 +1429,189 @@ export const cancelAppointmentByDoctor = async (appointmentId, doctorId, reason)
 /**
  * Reschedule an appointment (Doctor)
  */
-export const rescheduleAppointment = async (appointmentId, doctorId, newDateTime) => {
-    const appointment = await Appointment.findById(appointmentId);
+/**
+ * Request reschedule (Doctor) - Sets status to RESCHEDULE_REQUESTED
+ */
+export const requestRescheduleByDoctor = async (appointmentId, doctorId, reason) => {
+    const appointment = await Appointment.findById(appointmentId)
+        .populate({ path: 'doctor_id', populate: { path: 'user_id' } })
+        .populate({ path: 'patient_id', populate: { path: 'user_id' } });
+
     if (!appointment) {
         const err = new Error('Appointment not found');
         err.statusCode = 404;
         throw err;
     }
 
-    if (appointment.doctor_id.toString() !== doctorId.toString()) {
+    if (appointment.doctor_id._id.toString() !== doctorId.toString()) {
         const err = new Error('Unauthorized');
         err.statusCode = 403;
         throw err;
     }
 
-    // Parse new date and time
-    const [datePart, timePart] = newDateTime.split('T');
-    const newDate = new Date(datePart);
-    newDate.setHours(0, 0, 0, 0);
-
-    // Check availability
-    const availableSlots = await getAvailableSlots(doctorId, datePart);
-    const isAvailable = availableSlots.some(s => s.time === timePart);
-
-    if (!isAvailable) {
-        const err = new Error('Selected slot is no longer available');
+    // Only CONFIRMED appointments can be rescheduled
+    // REQUESTED appointments should be cancelled/declined instead
+    if (appointment.status !== 'CONFIRMED') {
+        const err = new Error('Only confirmed appointments can be rescheduled. Please cancel/decline requested appointments instead.');
         err.statusCode = 400;
         throw err;
     }
 
     // Update appointment
-    appointment.appointment_date = newDate;
-    appointment.slot_start_time = timePart;
-    appointment.slot_end_time = calculateEndTime(timePart);
+    const oldDate = appointment.appointment_date.toDateString();
+    const oldTime = appointment.slot_start_time;
 
+    appointment.status = 'RESCHEDULE_REQUESTED';
+    appointment.reschedule_reason = reason;
+    appointment.reschedule_requested_by = 'DOCTOR';
     await appointment.save();
 
     // Send notification/email
     try {
-        const patient = await Patient.findById(appointment.patient_id).populate('user_id');
-        if (patient && patient.user_id) {
-            await sendEmail(patient.user_id.email, 'Appointment Rescheduled', `Your appointment has been rescheduled to ${datePart} at ${timePart}.`);
+        if (appointment.patient_id.user_id?.email) {
+            const emailContent = `
+                <p>Your appointment with <strong>Dr. ${appointment.doctor_id.user_id?.full_name}</strong> needs to be rescheduled.</p>
+                <div class="warning">
+                    <strong>Previous Schedule:</strong> ${oldDate} at ${oldTime}<br/>
+                    <strong>Reason:</strong> ${reason || 'Not provided'}
+                </div>
+                <p>Please log in to your dashboard to select a new time or cancel for a full refund.</p>
+            `;
+            await sendEmail(appointment.patient_id.user_id.email, 'Action Required: Appointment Reschedule Request', emailContent);
         }
     } catch (err) {
         console.error('Failed to send reschedule email:', err);
     }
 
     return appointment;
+};
+
+/**
+ * Reschedule by Patient (Select new time)
+ */
+export const rescheduleAppointmentByPatient = async (appointmentId, patientId, newDateStr, newTime, reason) => {
+    const appointment = await Appointment.findById(appointmentId)
+        .populate({ path: 'doctor_id', populate: { path: 'user_id' } })
+        .populate({ path: 'patient_id', populate: { path: 'user_id' } });
+
+    if (!appointment) {
+        const err = new Error('Appointment not found');
+        err.statusCode = 404;
+        throw err;
+    }
+
+    if (appointment.patient_id._id.toString() !== patientId.toString()) {
+        const err = new Error('Unauthorized');
+        err.statusCode = 403;
+        throw err;
+    }
+
+    // Can reschedule from CONFIRMED (paid or unpaid) or RESCHEDULE_REQUESTED (paid)
+    if (!['CONFIRMED', 'RESCHEDULE_REQUESTED'].includes(appointment.status)) {
+        const err = new Error('Only confirmed or reschedule-requested appointments can be rescheduled');
+        err.statusCode = 400;
+        throw err;
+    }
+
+    // Parse new date first to compare with current appointment
+    const newDate = new Date(newDateStr);
+    newDate.setHours(0, 0, 0, 0);
+    
+    const currentDate = new Date(appointment.appointment_date);
+    currentDate.setHours(0, 0, 0, 0);
+
+    // Check if trying to reschedule to the same date and time
+    if (currentDate.getTime() === newDate.getTime() && appointment.slot_start_time === newTime) {
+        const err = new Error('Cannot reschedule to the same date and time. Please select a different slot.');
+        err.statusCode = 400;
+        throw err;
+    }
+
+    // Check availability
+    const availableSlots = await getAvailableSlots(appointment.doctor_id._id, newDateStr);
+    const isAvailable = availableSlots.some(s => s.time === newTime && s.available);
+
+    if (!isAvailable) {
+        const err = new Error('Selected slot is not available');
+        err.statusCode = 400;
+        throw err;
+    }
+
+    // Logic 8: If CONFIRMED + UNPAID → becomes new REQUESTED
+    // Check 24h constraint ONLY for PAID confirmed appointments
+    if (appointment.status === 'CONFIRMED' && appointment.payment_status === 'PAID') {
+        const now = new Date();
+        const appointmentDateTime = new Date(appointment.appointment_date);
+        const hoursDiff = (appointmentDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
+
+        if (hoursDiff < 24) {
+            const err = new Error('Cannot reschedule with less than 24 hours remaining. Please contact support.');
+            err.statusCode = 400;
+            throw err;
+        }
+    }
+
+    // Validate reschedule date is within booking window
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const daysDiff = Math.ceil((newDate - today) / (1000 * 60 * 60 * 24));
+
+    if (daysDiff < MIN_BOOKING_DAYS_ADVANCE) {
+        const err = new Error(`Appointments must be booked at least ${MIN_BOOKING_DAYS_ADVANCE} days in advance`);
+        err.statusCode = 400;
+        throw err;
+    }
+
+    if (daysDiff > MAX_BOOKING_DAYS_ADVANCE) {
+        const err = new Error(`Appointments cannot be booked more than ${MAX_BOOKING_DAYS_ADVANCE} days in advance`);
+        err.statusCode = 400;
+        throw err;
+    }
+
+    // Check if it's a weekend
+    const dayOfWeek = newDate.getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+        const err = new Error('Appointments cannot be rescheduled to weekends (Saturday/Sunday)');
+        err.statusCode = 400;
+        throw err;
+    }
+
+    // Update appointment
+    appointment.appointment_date = newDate;
+    appointment.slot_start_time = newTime;
+    appointment.slot_end_time = calculateEndTime(newTime);
+
+    // Status Logic for Patient Rescheduling:
+    // When patient reschedules a confirmed appointment, it becomes RESCHEDULE_REQUESTED
+    // for doctor to approve the new slot
+    appointment.status = 'RESCHEDULE_REQUESTED';
+    appointment.reschedule_requested_by = 'PATIENT';
+
+    // Append reason if provided
+    if (reason) {
+        appointment.reschedule_reason = (appointment.reschedule_reason ? appointment.reschedule_reason + ' | ' : '') + `Patient: ${reason}`;
+    }
+
+    await appointment.save();
+
+    // Notify doctor
+    try {
+        const emailContent = `
+            <p>Patient <strong>${appointment.patient_id.user_id?.full_name}</strong> has requested to reschedule their appointment.</p>
+            <div class="info">
+                <strong>New Date:</strong> ${newDateStr}<br/>
+                <strong>New Time:</strong> ${newTime}<br/>
+                <strong>Reason:</strong> ${reason || 'Not provided'}<br/>
+                <strong>Payment Status:</strong> ${appointment.payment_status === 'PAID' ? 'PAID' : 'PENDING'}
+            </div>
+            <p>Please review and approve this reschedule request in your dashboard.</p>
+        `;
+        await sendEmail(appointment.doctor_id.user_id?.email, 'Patient Reschedule Request', emailContent);
+    } catch (err) {
+        console.error('Failed to send email:', err);
+    }
+
+    return appointment;;;
 };
 
 /**
@@ -1055,6 +1975,10 @@ export const getPatientAppointments = async (patientId, status = null, page = 0,
             completedAt: apt.completed_at,
             cancelledBy: apt.cancelled_by,
             cancellationReason: apt.cancellation_reason,
+            rescheduleReason: apt.reschedule_reason,
+            rescheduleRequestedBy: apt.reschedule_requested_by,
+            doctorCancelledRescheduleRequest: apt.doctor_cancelled_reschedule_request,
+            doctorCancellationReason: apt.doctor_cancellation_reason,
             chatEnabled: apt.chat_enabled,
             createdAt: apt.created_at,
         })),
@@ -1114,6 +2038,8 @@ export const getDoctorAppointments = async (doctorId, status = null, date = null
             instructions: apt.instructions,
             cancelledBy: apt.cancelled_by,
             cancellationReason: apt.cancellation_reason,
+            rescheduleReason: apt.reschedule_reason,
+            rescheduleRequestedBy: apt.reschedule_requested_by,
             createdAt: apt.created_at,
         })),
         pageNumber: page,
@@ -1212,4 +2138,110 @@ export const getAppointmentById = async (appointmentId) => {
         chatEnabled: appointment.chat_enabled,
         createdAt: appointment.created_at,
     };
+};
+
+/**
+ * Request Emergency Reschedule (Doctor)
+ */
+export const requestDoctorEmergencyReschedule = async (appointmentId, doctorId, reason) => {
+    const appointment = await Appointment.findById(appointmentId);
+
+    if (!appointment) {
+        const err = new Error('Appointment not found');
+        err.statusCode = 404;
+        throw err;
+    }
+
+    if (appointment.doctor_id.toString() !== doctorId.toString()) {
+        const err = new Error('Unauthorized');
+        err.statusCode = 403;
+        throw err;
+    }
+
+    // Check if there is already a pending request
+    const existing = await DoctorEmergencyRescheduleRequest.findOne({
+        appointment_id: appointmentId,
+        status: 'PENDING'
+    });
+
+    if (existing) {
+        const err = new Error('An emergency reschedule request is already pending for this appointment');
+        err.statusCode = 400;
+        throw err;
+    }
+
+    // Create request
+    const request = await DoctorEmergencyRescheduleRequest.create({
+        appointment_id: appointmentId,
+        doctor_id: doctorId,
+        reason,
+        status: 'PENDING'
+    });
+
+    return request;
+};
+
+/**
+ * Approve Emergency Reschedule (Admin)
+ */
+export const approveDoctorEmergencyReschedule = async (requestId, adminId) => {
+    const request = await DoctorEmergencyRescheduleRequest.findById(requestId)
+        .populate('appointment_id');
+
+    if (!request) {
+        const err = new Error('Request not found');
+        err.statusCode = 404;
+        throw err;
+    }
+
+    if (request.status !== 'PENDING') {
+        const err = new Error('Request is already processed');
+        err.statusCode = 400;
+        throw err;
+    }
+
+    request.status = 'APPROVED';
+    request.admin_id = adminId;
+    request.admin_notes = 'Approved by Admin';
+    request.reviewed_at = new Date();
+    await request.save();
+
+    // Now perform the helper logic: Set appointment to RESCHEDULE_REQUESTED
+    const appointment = await Appointment.findById(request.appointment_id._id);
+    const reason = `Emergency Reschedule: ${request.reason}`;
+
+    // We reuse the logic essentially, but we force it
+    appointment.status = 'RESCHEDULE_REQUESTED';
+    appointment.reschedule_reason = reason;
+    await appointment.save();
+
+    // Notify Patient via Email
+    try {
+        const patient = await Patient.findById(appointment.patient_id).populate('user_id');
+        if (patient && patient.user_id?.email) {
+            const emailContent = `
+                 <p>An <strong>Emergency Reschedule</strong> has been requested by Dr. for your appointment.</p>
+                 <div class="warning">
+                     <strong>Reason:</strong> ${reason}
+                 </div>
+                 <p>The Admin has approved this request due to emergency.</p>
+                 <p>Please log in to your dashboard to <strong>Reschedule</strong> (payment carries over) or <strong>Cancel</strong> (full refund).</p>
+             `;
+            await sendEmail(patient.user_id.email, 'Emergency Reschedule Approved', emailContent);
+        }
+    } catch (err) {
+        console.error('Failed to send email:', err);
+    }
+
+    return request;
+};
+
+/**
+ * Get all Doctor Emergency Requests (Admin)
+ */
+export const getDoctorEmergencyRequests = async (status = 'PENDING') => {
+    return await DoctorEmergencyRescheduleRequest.find({ status })
+        .populate({ path: 'doctor_id', populate: { path: 'user_id' } })
+        .populate({ path: 'appointment_id', populate: { path: 'patient_id', populate: { path: 'user_id' } } })
+        .sort({ created_at: -1 });
 };
