@@ -80,11 +80,9 @@ const appointmentSchema = new mongoose.Schema(
       type: Date,
     },
     // Completion fields (filled by doctor)
-    prescription: {
-      type: String,
-    },
-    instructions: {
-      type: String,
+    prescription_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Prescription',
     },
     completed_at: {
       type: Date,

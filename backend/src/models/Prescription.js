@@ -16,10 +16,7 @@ const prescriptionSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Alert',
     },
-    appointment_id: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Appointment',
-    },
+    
     medications: [
       {
         name: {

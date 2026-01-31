@@ -19,6 +19,7 @@ import {
     getAvailableSlotsController,
     requestAppointmentController,
     getPatientAppointmentsController,
+    getPastPatientAppointmentsController,
     cancelPatientAppointmentController,
     cancelRescheduleRequestedController,
     handleRescheduleRejectionResponseController,
@@ -58,6 +59,7 @@ router.post('/medical-records/:type', addMedicalRecordEntryController);
 
 // Appointments
 router.get('/appointments', getPatientAppointmentsController);
+router.get('/appointments/past', getPastPatientAppointmentsController);
 router.get('/appointments/slots', getAvailableSlotsController);
 router.get('/appointments/verify-payment', verifyPaymentController);
 router.post('/appointments/book', requestAppointmentController);

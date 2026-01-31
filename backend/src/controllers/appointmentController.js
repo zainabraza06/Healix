@@ -42,6 +42,8 @@ import {
     markNoShow,
     getPatientAppointments,
     getDoctorAppointments,
+    getPastDoctorAppointments,
+    getPastPatientAppointments,
     getDoctorDailySchedule,
     getDoctorNextDaySchedule,
     getPendingEmergencyCancellations,
@@ -752,14 +754,14 @@ export const respondToDocCancelledRescheduleController = async (req, res, next) 
 export const completeAppointmentController = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { prescription, instructions } = req.body;
+        const { medications, instructions } = req.body;
 
         const doctor = await Doctor.findOne({ user_id: req.user._id });
         if (!doctor) {
             return res.status(404).json(errorResponse('Doctor profile not found'));
         }
 
-        const appointment = await completeAppointment(id, doctor._id, prescription, instructions);
+        const appointment = await completeAppointment(id, doctor._id, medications, instructions);
 
         await logSuccess({
             req,
@@ -800,6 +802,42 @@ export const markNoShowController = async (req, res, next) => {
         });
 
         res.json(successResponse('Patient marked as no-show', appointment));
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * Get past appointments for doctor
+ */
+export const getPastDoctorAppointmentsController = async (req, res, next) => {
+    try {
+        const { page = 0, size = 10 } = req.query;
+        const doctor = await Doctor.findOne({ user_id: req.user._id });
+        if (!doctor) {
+            return res.status(404).json(errorResponse('Doctor profile not found'));
+        }
+
+        const result = await getPastDoctorAppointments(doctor._id, parseInt(page), parseInt(size));
+        res.json(successResponse('Past appointments retrieved', result));
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * Get past appointments for patient
+ */
+export const getPastPatientAppointmentsController = async (req, res, next) => {
+    try {
+        const { page = 0, size = 10 } = req.query;
+        const patient = await Patient.findOne({ user_id: req.user._id });
+        if (!patient) {
+            return res.status(404).json(errorResponse('Patient profile not found'));
+        }
+
+        const result = await getPastPatientAppointments(patient._id, parseInt(page), parseInt(size));
+        res.json(successResponse('Past appointments retrieved', result));
     } catch (error) {
         next(error);
     }

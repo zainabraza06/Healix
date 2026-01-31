@@ -237,6 +237,15 @@ class ApiClient {
     return response.data;
   }
 
+  async getPastPatientAppointments(page: number = 0, size: number = 10): Promise<ApiResponse<any>> {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      size: size.toString(),
+    });
+    const response = await this.client.get(`/patient/appointments/past?${params}`);
+    return response.data;
+  }
+
   async getAvailableSlots(doctorId: string, date: string): Promise<ApiResponse<any[]>> {
     const response = await this.client.get(`/patient/appointments/slots?doctorId=${doctorId}&date=${date}`);
     return response.data;
@@ -323,6 +332,15 @@ class ApiClient {
     return response.data;
   }
 
+  async getPastDoctorAppointments(page: number = 0, size: number = 10): Promise<ApiResponse<any>> {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      size: size.toString(),
+    });
+    const response = await this.client.get(`/doctor/appointments/past?${params.toString()}`);
+    return response.data;
+  }
+
   async getDoctorDailySchedule(date?: string): Promise<ApiResponse<any>> {
     const url = date ? `/doctor/appointments/today?date=${date}` : '/doctor/appointments/today';
     const response = await this.client.get(url);
@@ -359,8 +377,8 @@ class ApiClient {
     return response.data;
   }
 
-  async completeAppointment(appointmentId: string, prescription: string, instructions: string): Promise<ApiResponse<any>> {
-    const response = await this.client.post(`/doctor/appointments/${appointmentId}/complete`, { prescription, instructions });
+  async completeAppointment(appointmentId: string, medications: any[], instructions: string): Promise<ApiResponse<any>> {
+    const response = await this.client.post(`/doctor/appointments/${appointmentId}/complete`, { medications, instructions });
     return response.data;
   }
 

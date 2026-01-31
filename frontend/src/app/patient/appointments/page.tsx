@@ -33,6 +33,8 @@ interface Appointment {
   doctorCancellationReason?: string;
   rescheduleRequestedBy?: 'PATIENT' | 'DOCTOR';
   rescheduleReason?: string;
+  prescription?: string;
+  instructions?: string;
 }
 
 interface Doctor {
@@ -438,18 +440,22 @@ export default function AppointmentsPage() {
       setIsLoading(true);
 
       // Fetch based on active tab
-      let statusFilter = '';
-      if (activeTab === 'confirmed') {
-        statusFilter = 'CONFIRMED';
-      } else if (activeTab === 'requested') {
-        statusFilter = 'REQUESTED';
-      } else if (activeTab === 'cancelled') {
-        statusFilter = 'CANCELLED';
-      } else if (activeTab === 'rescheduling') {
-        statusFilter = 'RESCHEDULE_REQUESTED';
+      let response;
+      if (activeTab === 'past') {
+        response = await apiClient.getPastPatientAppointments(currentPage, pageSize);
+      } else {
+        let statusFilter = '';
+        if (activeTab === 'confirmed') {
+          statusFilter = 'CONFIRMED';
+        } else if (activeTab === 'requested') {
+          statusFilter = 'REQUESTED';
+        } else if (activeTab === 'cancelled') {
+          statusFilter = 'CANCELLED';
+        } else if (activeTab === 'rescheduling') {
+          statusFilter = 'RESCHEDULE_REQUESTED';
+        }
+        response = await apiClient.getPatientAppointments(currentPage, pageSize, statusFilter);
       }
-
-      const response = await apiClient.getPatientAppointments(currentPage, pageSize, statusFilter);
 
       if (response.success && response.data) {
         setAppointments(response.data.content || []);
@@ -687,6 +693,9 @@ export default function AppointmentsPage() {
       filtered = appointments.filter((apt) => apt.status === 'CONFIRMED');
     } else if (activeTab === 'cancelled') {
       filtered = appointments.filter((apt) => apt.status === 'CANCELLED');
+    } else if (activeTab === 'past') {
+      // Past appointments are already filtered by the API
+      filtered = appointments;
     }
     
     return filtered;
@@ -935,6 +944,16 @@ export default function AppointmentsPage() {
               >
                 Rescheduling
               </button>
+              <button
+                onClick={() => setActiveTab('past')}
+                className={`px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                  activeTab === 'past'
+                    ? 'bg-purple-600 text-white shadow-xl shadow-purple-600/20'
+                    : 'bg-white/40 text-slate-600 border border-white/60 hover:bg-white/60'
+                }`}
+              >
+                Past
+              </button>
             </div>
 
             {/* Appointments Content */}
@@ -964,6 +983,7 @@ export default function AppointmentsPage() {
                       activeTab === 'requested' ? 'bg-amber-500' :
                       activeTab === 'rescheduling' ? 'bg-cyan-500' :
                       activeTab === 'doctorRequests' ? 'bg-blue-500' :
+                      activeTab === 'past' ? 'bg-purple-500' :
                       'bg-red-500'
                     }`} />
 
@@ -973,6 +993,7 @@ export default function AppointmentsPage() {
                         activeTab === 'requested' ? 'bg-amber-100 text-amber-700' :
                         activeTab === 'rescheduling' ? 'bg-cyan-100 text-cyan-700' :
                         activeTab === 'doctorRequests' ? 'bg-blue-100 text-blue-700' :
+                        activeTab === 'past' ? 'bg-purple-100 text-purple-700' :
                         'bg-red-100 text-red-700'
                       }`}>
                         {apt.doctorName?.charAt(0) || 'D'}
@@ -1000,6 +1021,16 @@ export default function AppointmentsPage() {
                                                             : apt.status === 'RESCHEDULE_REQUESTED' && apt.rescheduleRequestedBy === 'DOCTOR'
                                                               ? 'Doctor Requested Reschedule'
                                                               : 'Rescheduling'}
+                                                        </span>
+                                                      </div>
+                                                    )}
+                                                    {/* Status for Past Tab */}
+                                                    {activeTab === 'past' && (
+                                                      <div className="flex items-center gap-2 col-span-full">
+                                                        <span className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest ${
+                                                          apt.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
+                                                        }`}>
+                                                          {apt.status === 'COMPLETED' ? 'Completed' : 'No Show'}
                                                         </span>
                                                       </div>
                                                     )}
@@ -1090,8 +1121,30 @@ export default function AppointmentsPage() {
                         )}
 
                         {/* Action Buttons */}
-                        {(activeTab === 'requested' || activeTab === 'confirmed' || activeTab === 'rescheduling' || activeTab === 'doctorRequests') && (
+                        {(activeTab === 'requested' || activeTab === 'confirmed' || activeTab === 'rescheduling' || activeTab === 'doctorRequests' || activeTab === 'past') && (
                           <div className="mt-6 flex flex-wrap items-center gap-4">
+                            {/* Past Appointments - Show prescription and instructions */}
+                            {activeTab === 'past' && apt.status === 'COMPLETED' && apt.prescription?.medications && apt.prescription.medications.length > 0 && (
+                              <div className="w-full bg-emerald-50 p-4 rounded-xl border border-emerald-200">
+                                <h4 className="text-sm font-black text-emerald-800 uppercase tracking-widest mb-3">Prescription</h4>
+                                <div className="space-y-3 mb-4">
+                                  {apt.prescription.medications.map((med: any, idx: number) => (
+                                    <div key={idx} className="bg-white p-3 rounded-lg border border-emerald-100">
+                                      <p className="font-semibold text-emerald-800">{med.name} - {med.dosage}</p>
+                                      <p className="text-xs text-slate-600 mt-1">Frequency: {med.frequency} | Duration: {med.duration}</p>
+                                      {med.instructions && <p className="text-xs text-slate-600 mt-1 italic">Instructions: {med.instructions}</p>}
+                                    </div>
+                                  ))}
+                                </div>
+                                {apt.prescription.notes && (
+                                  <>
+                                    <h4 className="text-sm font-black text-emerald-800 uppercase tracking-widest mb-2">Follow-up Instructions</h4>
+                                    <p className="text-sm text-slate-700">{apt.prescription.notes}</p>
+                                  </>
+                                )}
+                              </div>
+                            )}
+
                             {/* Reschedule Button - For Doctor Requests tab, this shows the doctor's request */}
                             {activeTab === 'doctorRequests' ? (
                               <button
