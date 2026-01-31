@@ -1124,11 +1124,14 @@ export default function AppointmentsPage() {
                         {(activeTab === 'requested' || activeTab === 'confirmed' || activeTab === 'rescheduling' || activeTab === 'doctorRequests' || activeTab === 'past') && (
                           <div className="mt-6 flex flex-wrap items-center gap-4">
                             {/* Past Appointments - Show prescription and instructions */}
-                            {activeTab === 'past' && apt.status === 'COMPLETED' && apt.prescription?.medications && apt.prescription.medications.length > 0 && (
+                            {activeTab === 'past' && apt.status === 'COMPLETED' && 
+                              typeof apt.prescription === 'object' &&
+                              Array.isArray((apt.prescription as any).medications) &&
+                              (apt.prescription as any).medications.length > 0 && (
                               <div className="w-full bg-emerald-50 p-4 rounded-xl border border-emerald-200">
                                 <h4 className="text-sm font-black text-emerald-800 uppercase tracking-widest mb-3">Prescription</h4>
                                 <div className="space-y-3 mb-4">
-                                  {apt.prescription.medications.map((med: any, idx: number) => (
+                                  {(apt.prescription as any).medications.map((med: any, idx: number) => (
                                     <div key={idx} className="bg-white p-3 rounded-lg border border-emerald-100">
                                       <p className="font-semibold text-emerald-800">{med.name} - {med.dosage}</p>
                                       <p className="text-xs text-slate-600 mt-1">Frequency: {med.frequency} | Duration: {med.duration}</p>
@@ -1136,10 +1139,10 @@ export default function AppointmentsPage() {
                                     </div>
                                   ))}
                                 </div>
-                                {apt.prescription.notes && (
+                                {(apt.prescription as any).notes && (
                                   <>
                                     <h4 className="text-sm font-black text-emerald-800 uppercase tracking-widest mb-2">Follow-up Instructions</h4>
-                                    <p className="text-sm text-slate-700">{apt.prescription.notes}</p>
+                                    <p className="text-sm text-slate-700">{(apt.prescription as any).notes}</p>
                                   </>
                                 )}
                               </div>
@@ -1162,8 +1165,8 @@ export default function AppointmentsPage() {
                               </button>
                             )}
 
-                            {/* Cancel Button */}
-                            {canCancelAppointment(apt) ? (
+                            {/* Cancel Button - Only show for non-past appointments */}
+                            {activeTab !== 'past' && canCancelAppointment(apt) ? (
                               <button
                                 onClick={() => {
                                   setAppointmentToCancel(apt);
@@ -1174,7 +1177,7 @@ export default function AppointmentsPage() {
                               >
                                 Cancel Appointment
                               </button>
-                            ) : (
+                            ) : activeTab !== 'past' && !canCancelAppointment(apt) ? (
                               <button
                                 disabled
                                 title={getCancellationDisabledReason(apt)}
@@ -1182,7 +1185,7 @@ export default function AppointmentsPage() {
                               >
                                 Cannot Cancel
                               </button>
-                            )}
+                            ) : null}
                             {!canCancelAppointment(apt) && activeTab === 'confirmed' && (
                               <span className="text-[9px] text-red-600 font-bold uppercase tracking-widest">
                                 {getCancellationDisabledReason(apt)}

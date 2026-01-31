@@ -2039,7 +2039,8 @@ export const getPastDoctorAppointments = async (doctorId, page = 0, size = 10) =
     
     const query = { 
         doctor_id: doctorId,
-        appointment_date: { $lt: today } // Only appointments before today
+        appointment_date: { $lt: today }, // Only appointments before today
+        status: { $nin: ['COMPLETED', 'NO_SHOW', 'CANCELLED'] } // Exclude already finalized appointments
     };
 
     const skip = page * size;
@@ -2092,7 +2093,7 @@ export const getPastPatientAppointments = async (patientId, page = 0, size = 10)
     
     const query = { 
         patient_id: patientId,
-        appointment_date: { $lt: today } // Only appointments before today
+        appointment_date: { $lt: today } // Only appointments before today - patients see all past appointments
     };
 
     const skip = page * size;

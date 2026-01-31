@@ -237,7 +237,9 @@ export default function DoctorAppointmentsPage() {
     }
   };
 
-  const handleCompleteAppointment = async () => {
+  const handleCompleteAppointment = async (e: React.FormEvent) => {
+    e.preventDefault();
+
     // Validate medications
     const validMedications = medications.filter(med => med.name.trim() && med.dosage.trim() && med.frequency.trim() && med.duration.trim());
     if (validMedications.length === 0) {
@@ -637,11 +639,11 @@ export default function DoctorAppointmentsPage() {
                   initial={{ opacity: 0, scale: 0.95, y: 20 }}
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                  className="glass-card p-10 max-w-lg w-full border-purple-500/30 shadow-2xl bg-purple-50/10"
+                  className="glass-card p-6 max-w-2xl w-full border-purple-500/30 shadow-2xl bg-purple-50/10"
                 >
-                  <div className="flex justify-between items-start mb-8">
+                  <div className="flex justify-between items-start mb-6">
                     <div>
-                      <h2 className="text-2xl font-black text-purple-600 tracking-tight uppercase">Complete Appointment</h2>
+                      <h2 className="text-xl font-black text-purple-600 tracking-tight uppercase">Complete Appointment</h2>
                       <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mt-1">Patient: {selectedAppointment.patientName}</p>
                     </div>
                     <button onClick={() => setShowCompleteModal(false)} className="p-2 hover:bg-slate-100 rounded-xl transition-colors">
@@ -649,7 +651,7 @@ export default function DoctorAppointmentsPage() {
                     </button>
                   </div>
 
-                  <div className="space-y-6">
+                  <form onSubmit={handleCompleteAppointment} className="space-y-5">
                     <div>
                       <div className="flex justify-between items-center mb-3">
                         <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
@@ -660,13 +662,13 @@ export default function DoctorAppointmentsPage() {
                           onClick={() => setMedications([...medications, { name: '', dosage: '', frequency: '', duration: '', instructions: '' }])}
                           className="px-3 py-1 bg-purple-100 text-purple-700 rounded-lg text-[8px] font-black uppercase hover:bg-purple-200"
                         >
-                          + Add Medication
+                          + Add
                         </button>
                       </div>
-                      <div className="space-y-4 max-h-60 overflow-y-auto">
+                      <div className="space-y-3 max-h-48 overflow-y-auto">
                         {medications.map((med, index) => (
-                          <div key={index} className="p-4 bg-white/50 rounded-xl border border-purple-200">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                          <div key={index} className="p-3 bg-white/50 rounded-xl border border-purple-200">
+                            <div className="grid grid-cols-2 gap-2 mb-2">
                               <input
                                 type="text"
                                 placeholder="Medication name"
@@ -693,7 +695,7 @@ export default function DoctorAppointmentsPage() {
                               />
                               <input
                                 type="text"
-                                placeholder="Frequency (e.g., 3 times daily)"
+                                placeholder="Frequency"
                                 value={med.frequency}
                                 onChange={(e) => {
                                   const newMeds = [...medications];
@@ -705,7 +707,7 @@ export default function DoctorAppointmentsPage() {
                               />
                               <input
                                 type="text"
-                                placeholder="Duration (e.g., 7 days)"
+                                placeholder="Duration"
                                 value={med.duration}
                                 onChange={(e) => {
                                   const newMeds = [...medications];
@@ -717,7 +719,7 @@ export default function DoctorAppointmentsPage() {
                               />
                             </div>
                             <textarea
-                              placeholder="Special instructions (optional)"
+                              placeholder="Instructions (optional)"
                               value={med.instructions}
                               onChange={(e) => {
                                 const newMeds = [...medications];
@@ -725,13 +727,13 @@ export default function DoctorAppointmentsPage() {
                                 setMedications(newMeds);
                               }}
                               className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm font-medium resize-none"
-                              rows={2}
+                              rows={1}
                             />
                             {medications.length > 1 && (
                               <button
                                 type="button"
                                 onClick={() => setMedications(medications.filter((_, i) => i !== index))}
-                                className="mt-2 px-3 py-1 bg-red-100 text-red-700 rounded-lg text-[8px] font-black uppercase hover:bg-red-200"
+                                className="mt-2 px-2 py-1 bg-red-100 text-red-700 rounded text-[8px] font-black uppercase hover:bg-red-200"
                               >
                                 Remove
                               </button>
@@ -741,34 +743,34 @@ export default function DoctorAppointmentsPage() {
                       </div>
                     </div>
                     <div>
-                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-3">
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">
                         Follow-up Instructions
                       </label>
                       <textarea
                         value={instructions}
                         onChange={(e) => setInstructions(e.target.value)}
-                        placeholder="Enter follow-up instructions for the patient..."
-                        className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-4 focus:ring-purple-500/10 focus:border-purple-500 transition-all font-bold text-slate-700 min-h-[100px] resize-none"
+                        placeholder="Enter follow-up instructions..."
+                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-purple-500/10 focus:border-purple-500 transition-all font-bold text-slate-700 min-h-[80px] resize-none"
                         required
                       />
                     </div>
-                    <div className="flex gap-3 pt-6">
+                    <div className="flex gap-3 pt-4">
                       <button
                         type="button"
                         onClick={() => setShowCompleteModal(false)}
-                        className="flex-1 px-6 py-4 bg-white border border-slate-200 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all active:scale-[0.98]"
+                        className="flex-1 px-6 py-3 bg-white border border-slate-200 text-slate-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all active:scale-[0.98]"
                       >
                         Cancel
                       </button>
                       <button
-                        onClick={handleCompleteAppointment}
+                        type="submit"
                         disabled={isSubmitting || medications.filter(med => med.name.trim() && med.dosage.trim() && med.frequency.trim() && med.duration.trim()).length === 0 || !instructions.trim()}
-                        className="flex-1 px-6 py-4 bg-purple-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-purple-700 shadow-xl shadow-purple-600/20 transition-all active:scale-[0.98]"
+                        className="flex-1 px-6 py-3 bg-purple-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-purple-700 shadow-xl shadow-purple-600/20 transition-all active:scale-[0.98]"
                       >
                         {isSubmitting ? 'Completing...' : 'Complete'}
                       </button>
                     </div>
-                  </div>
+                  </form>
                 </motion.div>
               </motion.div>
             )}
@@ -1164,26 +1166,7 @@ export default function DoctorAppointmentsPage() {
                               </div>
                             </div>
                             <div className="flex flex-col gap-3 w-full md:w-auto">
-                              {apt.status === 'COMPLETED' && apt.prescription?.medications && apt.prescription?.medications.length > 0 ? (
-                                <div className="text-sm text-slate-600 bg-white/50 p-3 rounded-xl">
-                                  <p className="font-bold mb-2">Prescription:</p>
-                                  <div className="space-y-2">
-                                    {apt.prescription.medications.map((med: any, idx: number) => (
-                                      <div key={idx} className="bg-white/70 p-2 rounded-lg">
-                                        <p className="font-semibold">{med.name} - {med.dosage}</p>
-                                        <p className="text-xs">Frequency: {med.frequency} | Duration: {med.duration}</p>
-                                        {med.instructions && <p className="text-xs italic">Instructions: {med.instructions}</p>}
-                                      </div>
-                                    ))}
-                                  </div>
-                                  {apt.prescription.notes && (
-                                    <>
-                                      <p className="font-bold mt-3 mb-1">Follow-up Instructions:</p>
-                                      <p>{apt.prescription.notes}</p>
-                                    </>
-                                  )}
-                                </div>
-                              ) : apt.status === 'COMPLETED' ? (
+                              <div className="flex gap-2">
                                 <button
                                   onClick={() => {
                                     setSelectedAppointment(apt);
@@ -1191,33 +1174,17 @@ export default function DoctorAppointmentsPage() {
                                     setInstructions('');
                                     setShowCompleteModal(true);
                                   }}
-                                  className="flex-1 md:flex-none px-8 py-3.5 bg-purple-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-purple-700 shadow-xl shadow-purple-600/20 transition-all active:scale-[0.98]"
+                                  className="flex-1 md:flex-none px-6 py-3.5 bg-purple-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-purple-700 shadow-xl shadow-purple-600/20 transition-all active:scale-[0.98]"
                                 >
-                                  Complete Appointment
+                                  Complete
                                 </button>
-                              ) : apt.status === 'NO_SHOW' ? (
-                                <span className="px-6 py-3.5 bg-red-100 text-red-700 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center">No Show</span>
-                              ) : isAppointmentPastOrToday(apt.appointmentDate) ? (
-                                <div className="flex gap-2">
-                                  <button
-                                    onClick={() => {
-                                      setSelectedAppointment(apt);
-                                      setMedications([{ name: '', dosage: '', frequency: '', duration: '', instructions: '' }]);
-                                      setInstructions('');
-                                      setShowCompleteModal(true);
-                                    }}
-                                    className="flex-1 md:flex-none px-6 py-3.5 bg-purple-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-purple-700 shadow-xl shadow-purple-600/20 transition-all active:scale-[0.98]"
-                                  >
-                                    Complete
-                                  </button>
-                                  <button
-                                    onClick={() => handleMarkNoShow(apt.id)}
-                                    className="flex-1 md:flex-none px-6 py-3.5 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-700 shadow-xl shadow-red-600/20 transition-all active:scale-[0.98]"
-                                  >
-                                    No Show
-                                  </button>
-                                </div>
-                              ) : null}
+                                <button
+                                  onClick={() => handleMarkNoShow(apt.id)}
+                                  className="flex-1 md:flex-none px-6 py-3.5 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-700 shadow-xl shadow-red-600/20 transition-all active:scale-[0.98]"
+                                >
+                                  No Show
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </motion.div>
