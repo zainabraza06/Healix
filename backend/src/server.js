@@ -8,6 +8,7 @@ import routes from './routes/index.js';
 import errorHandler from './middleware/errorHandler.js';
 import config from './config/index.js';
 import { initSocket } from './config/socket.js';
+import { initializeScheduler } from './services/schedulerService.js';
 
 dotenv.config();
 
@@ -50,8 +51,10 @@ app.use((req, res) => {
 const PORT = config.port;
 const server = http.createServer(app);
 initSocket(server, config.corsOrigins);
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   console.log(`\nServer is running on port ${PORT}`);
+  // Initialize all scheduled jobs
+  initializeScheduler();
 });
 
 export default app;

@@ -22,6 +22,7 @@ import {
   managePatientStatusController,
   downloadPatientsController,
   downloadAlertsController,
+  downloadAppointmentsController,
 } from '../controllers/adminController.js';
 import {
   getMedicalRecordsController,
@@ -37,6 +38,8 @@ import {
 import {
   getPendingEmergencyCancellationsController,
   reviewEmergencyCancellationController,
+  getDoctorEmergencyRequestsController,
+  approveDoctorEmergencyRescheduleController,
 } from '../controllers/appointmentController.js';
 import { getAllDoctorsController, getDoctorByIdController } from '../services/doctorService.js';
 import { registerAdminController } from '../controllers/authController.js';
@@ -67,6 +70,7 @@ router.get('/patients/:patientId', getPatientByIdController);
 router.get('/doctors', getPaginatedDoctorsController);
 router.get('/doctors/download', downloadDoctorsController);
 router.get('/appointments', getPaginatedAppointmentsController);
+router.get('/appointments/download', downloadAppointmentsController);
 router.get('/alerts', getPaginatedAlertsController);
 router.get('/alerts/export', downloadAlertsController);
 router.get('/logs', getLogsController);
@@ -95,6 +99,10 @@ router.get('/doctors/:doctorId', getDoctorByIdController);
 // Emergency cancellation requests
 router.get('/emergency-cancellations', getPendingEmergencyCancellationsController);
 router.post('/emergency-cancellations/:id/review', reviewEmergencyCancellationController);
+
+// Doctor Emergency Reschedule Requests
+router.get('/emergency-reschedules', getDoctorEmergencyRequestsController);
+router.post('/emergency-reschedules/:requestId/approve', approveDoctorEmergencyRescheduleController);
 
 export default router;
 

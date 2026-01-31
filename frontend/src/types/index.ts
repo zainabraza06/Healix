@@ -157,8 +157,9 @@ export interface Appointment {
   doctorId: string;
   patientName?: string;
   scheduledTime: string;
-  status: 'PENDING' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED';
-  type: 'IN_PERSON' | 'ONLINE' | 'PHONE';
+  status: 'PENDING' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED' | 'RESCHEDULE_REQUESTED';
+  appointmentType?: 'IN_PERSON' | 'ONLINE' | 'PHONE';
+  type?: 'IN_PERSON' | 'ONLINE' | 'PHONE';
   reason?: string;
   notes?: string;
   appointmentDate?: string;
@@ -182,6 +183,7 @@ export interface DoctorDashboard {
   doctor: Doctor;
   upcomingAppointments: Appointment[];
   pendingRequests: Appointment[];
+  rescheduleRequests?: Appointment[];
   alerts: Alert[];
   weeklyActivity?: { name: string; appointments: number }[];
   stats: {

@@ -5,9 +5,15 @@ import { useAuthStore } from '@/lib/authStore';
 import { apiClient } from '@/lib/apiClient';
 import ProtectedLayout from '@/components/ProtectedLayout';
 import toast from 'react-hot-toast';
-import { Calendar, Clock, MapPin, AlertCircle, Video, CreditCard, X, MessageCircle, FileText } from 'lucide-react';
+import { Calendar, Clock, MapPin, AlertCircle, Video, CreditCard, X, Activity, Plus } from 'lucide-react';
 import Spinner from '@/components/Spinner';
 import EmptyState from '@/components/EmptyState';
+import dynamic from 'next/dynamic';
+import { motion, AnimatePresence } from 'framer-motion';
+
+// 3D Background
+const Scene = dynamic(() => import('@/components/canvas/Scene'), { ssr: false });
+const FloatingIcons = dynamic(() => import('@/components/canvas/FloatingIcons'), { ssr: false });
 
 interface Appointment {
   id: string;
@@ -18,7 +24,7 @@ interface Appointment {
   slotStartTime: string;
   slotEndTime: string;
   appointmentType: 'ONLINE' | 'OFFLINE';
-  status: 'REQUESTED' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW';
+  status: 'REQUESTED' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW' | 'RESCHEDULE_REQUESTED';
   reason: string;
   meetingLink?: string;
   location?: string;
@@ -30,6 +36,10 @@ interface Appointment {
   instructions?: string;
   cancelledBy?: string;
   cancellationReason?: string;
+  rescheduleReason?: string;
+  rescheduleRequestedBy?: 'PATIENT' | 'DOCTOR';
+  doctorCancelledRescheduleRequest?: boolean;
+  doctorCancellationReason?: string;
   chatEnabled?: boolean;
 }
 
@@ -47,16 +57,14 @@ interface Slot {
 
 export default function AppointmentsPage() {
   const { } = useAuthStore();
-  const [upcomingAppointments, setUpcomingAppointments] = useState<Appointment[]>([]);
-  const [pastAppointments, setPastAppointments] = useState<Appointment[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [activeTab, setActiveTab] = useState<'confirmed' | 'requested' | 'cancelled' | 'rescheduling'>('confirmed');
 
   // Pagination state
-  const [upcomingPage, setUpcomingPage] = useState(0);
-  const [upcomingTotalPages, setUpcomingTotalPages] = useState(0);
-  const [pastPage, setPastPage] = useState(0);
-  const [pastTotalPages, setPastTotalPages] = useState(0);
+  const [currentPage, setCurrentPage] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
   const pageSize = 10;
 
   // Booking form state
@@ -72,11 +80,24 @@ export default function AppointmentsPage() {
 
   // Modal states
   const [showCancelModal, setShowCancelModal] = useState(false);
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [showDetailsModal, setShowDetailsModal] = useState(false);
-  const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
+  const [appointmentToCancel, setAppointmentToCancel] = useState<Appointment | null>(null);
   const [cancelReason, setCancelReason] = useState('');
-  const [isEmergencyCancel, setIsEmergencyCancel] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
+
+  // Reschedule Modal State
+  const [showRescheduleModal, setShowRescheduleModal] = useState(false);
+  const [appointmentToReschedule, setAppointmentToReschedule] = useState<Appointment | null>(null);
+  const [rescheduleDate, setRescheduleDate] = useState('');
+  const [rescheduleSlot, setRescheduleSlot] = useState('');
+  const [rescheduleReason, setRescheduleReason] = useState('');
+  const [rescheduleAvailableSlots, setRescheduleAvailableSlots] = useState<Slot[]>([]);
+  const [isLoadingRescheduleSlots, setIsLoadingRescheduleSlots] = useState(false);
+
+  // Doctor Cancelled Reschedule Modal State
+  const [showDocCancelledModal, setShowDocCancelledModal] = useState(false);
+  const [appointmentWithDocCancel, setAppointmentWithDocCancel] = useState<Appointment | null>(null);
+  const [docCancelReason, setDocCancelReason] = useState('');
+  const [isProcessingDocCancel, setIsProcessingDocCancel] = useState(false);
 
   // Calculate booking window dates (3 days to 30 days from now)
   const { minBookingDate, maxBookingDate } = useMemo(() => {
@@ -113,7 +134,7 @@ export default function AppointmentsPage() {
     if (payment) {
       window.history.replaceState({}, '', '/patient/appointments');
     }
-  }, [upcomingPage, pastPage]);
+  }, [activeTab, currentPage]);
 
   const handlePaymentCallback = async (sessionId: string) => {
     try {
@@ -128,9 +149,296 @@ export default function AppointmentsPage() {
     }
   };
 
+  // Check if appointment can be cancelled
+  const canCancelAppointment = (apt: Appointment): boolean => {
+    // Can cancel REQUESTED anytime (withdraw request)
+    if (apt.status === 'REQUESTED') {
+      return true;
+    }
+
+    // Can cancel RESCHEDULE_REQUESTED anytime
+    if (apt.status === 'RESCHEDULE_REQUESTED') {
+      return true;
+    }
+
+    if (apt.status === 'CONFIRMED') {
+      // Can cancel only if 24 hours before the appointment
+      const appointmentDate = new Date(apt.appointmentDate);
+      const now = new Date();
+      const diffHours = (appointmentDate.getTime() - now.getTime()) / (1000 * 60 * 60);
+
+      return diffHours >= 24;
+    }
+
+    return false;
+  };
+
+  // Get cancellation disabled reason
+  const getCancellationDisabledReason = (apt: Appointment): string => {
+    if (apt.status === 'CONFIRMED') {
+      const appointmentDate = new Date(apt.appointmentDate);
+      const now = new Date();
+      const diffHours = (appointmentDate.getTime() - now.getTime()) / (1000 * 60 * 60);
+
+      if (diffHours < 24) {
+        return 'Cannot cancel within 24 hours of appointment';
+      }
+    }
+    return '';
+  };
+
+  // Check if video consultation button should be shown
+  // Only show 15 minutes before appointment until appointment end time
+  const canShowVideoConsultation = (apt: Appointment): boolean => {
+    const appointmentDate = new Date(apt.appointmentDate);
+    const [hours, minutes] = apt.slotStartTime.split(':').map(Number);
+    const appointmentStart = new Date(appointmentDate);
+    appointmentStart.setHours(hours, minutes, 0, 0);
+
+    // End time is 30 minutes after start (slot duration)
+    const appointmentEnd = new Date(appointmentStart);
+    appointmentEnd.setMinutes(appointmentEnd.getMinutes() + 30);
+
+    const now = new Date();
+
+    // Show if we're within 15 minutes before start OR during the appointment
+    const fifteenMinutesBefore = new Date(appointmentStart);
+    fifteenMinutesBefore.setMinutes(fifteenMinutesBefore.getMinutes() - 15);
+
+    return now >= fifteenMinutesBefore && now <= appointmentEnd;
+  };
+
+  const handleCancelAppointment = async () => {
+    if (!appointmentToCancel || !cancelReason.trim()) {
+      toast.error('Please provide a cancellation reason');
+      return;
+    }
+
+    try {
+      setIsCancelling(true);
+      
+      // Use different endpoint for RESCHEDULE_REQUESTED appointments
+      const endpoint = appointmentToCancel.status === 'RESCHEDULE_REQUESTED'
+        ? `/patient/appointments/${appointmentToCancel.id}/cancel-reschedule-requested`
+        : `/patient/appointments/${appointmentToCancel.id}/cancel`;
+
+      const response = await apiClient.post(endpoint, {
+        reason: cancelReason
+      });
+
+      if (response.success) {
+        const message = 
+          appointmentToCancel.status === 'RESCHEDULE_REQUESTED'
+            ? 'Appointment cancelled. Full refund processed.'
+            : appointmentToCancel.status === 'REQUESTED'
+            ? 'Appointment request withdrawn successfully'
+            : 'Appointment cancelled successfully';
+        
+        toast.success(message);
+        setShowCancelModal(false);
+        setAppointmentToCancel(null);
+        setCancelReason('');
+        fetchAppointments();
+      } else {
+        toast.error(response.message || 'Failed to cancel appointment');
+      }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Error cancelling appointment');
+      console.error(err);
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
+  // Open Reschedule Modal
+  const openRescheduleModal = (apt: Appointment) => {
+    // Check 24h constraint if CONFIRMED
+    if (apt.status === 'CONFIRMED') {
+      const appointmentDate = new Date(apt.appointmentDate);
+      const now = new Date();
+      const diffHours = (appointmentDate.getTime() - now.getTime()) / (1000 * 60 * 60);
+
+      if (diffHours < 24) {
+        toast.error('Cannot reschedule within 24 hours of appointment. Please contact support.');
+        return;
+      }
+    }
+
+    setAppointmentToReschedule(apt);
+    setRescheduleDate('');
+    setRescheduleSlot('');
+    setRescheduleReason('');
+    setRescheduleAvailableSlots([]);
+    setShowRescheduleModal(true);
+  };
+
+  // Fetch slots for reschedule date
+  useEffect(() => {
+    if (showRescheduleModal && appointmentToReschedule && rescheduleDate) {
+      const fetchRescheduleSlots = async () => {
+        try {
+          setIsLoadingRescheduleSlots(true);
+          const response = await apiClient.getAvailableSlots(appointmentToReschedule.doctorId, rescheduleDate);
+          if (response.success && response.data) {
+            setRescheduleAvailableSlots(response.data);
+          }
+        } catch (err) {
+          console.error(err);
+          toast.error('Failed to load slots');
+        } finally {
+          setIsLoadingRescheduleSlots(false);
+        }
+      };
+
+      const dateObj = new Date(rescheduleDate);
+      dateObj.setHours(0, 0, 0, 0);
+
+      // Validate booking window (3 to 30 days)
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const minDate = new Date(today);
+      minDate.setDate(today.getDate() + 3);
+      const maxDate = new Date(today);
+      maxDate.setDate(today.getDate() + 30);
+
+      if (dateObj < minDate || dateObj > maxDate) {
+        setRescheduleAvailableSlots([]);
+        toast.error('Please select a date between 3 and 30 days from today');
+        return;
+      }
+
+      // Check for weekend
+      const day = dateObj.getDay();
+      if (day === 0 || day === 6) {
+        setRescheduleAvailableSlots([]);
+        toast.error('Appointments cannot be rescheduled to weekends');
+        return;
+      }
+
+      // Basic validation
+      if (/^\d{4}-\d{2}-\d{2}$/.test(rescheduleDate)) {
+        fetchRescheduleSlots();
+      }
+    }
+  }, [rescheduleDate, appointmentToReschedule, showRescheduleModal]);
+
+  const handleRescheduleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!appointmentToReschedule || !rescheduleDate || !rescheduleSlot) {
+      toast.error('Please select date and time');
+      return;
+    }
+
+    const dateObj = new Date(rescheduleDate);
+    dateObj.setHours(0, 0, 0, 0);
+
+    // Validate booking window (3 to 30 days)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const minDate = new Date(today);
+    minDate.setDate(today.getDate() + 3);
+    const maxDate = new Date(today);
+    maxDate.setDate(today.getDate() + 30);
+
+    if (dateObj < minDate) {
+      toast.error('Appointments must be booked at least 3 days in advance');
+      return;
+    }
+
+    if (dateObj > maxDate) {
+      toast.error('Appointments cannot be booked more than 30 days in advance');
+      return;
+    }
+
+    // Check for weekend
+    const day = dateObj.getDay();
+    if (day === 0 || day === 6) {
+      toast.error('Appointments cannot be rescheduled to weekends');
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      const response = await apiClient.rescheduleAppointmentPatient(
+        appointmentToReschedule.id,
+        rescheduleDate,
+        rescheduleSlot,
+        rescheduleReason
+      );
+
+      if (response.success) {
+        toast.success('Appointment rescheduled successfully!');
+        setShowRescheduleModal(false);
+        setAppointmentToReschedule(null);
+        fetchAppointments();
+      } else {
+        toast.error(response.message || 'Failed to reschedule');
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'An error occurred');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handlePayNow = async (appointmentId: string) => {
+    try {
+      setIsLoading(true);
+      const response = await apiClient.createStripeCheckout(appointmentId);
+      if (response.success && response.data?.url) {
+        window.location.href = response.data.url;
+      } else {
+        toast.error(response.message || 'Failed to initiate payment');
+      }
+    } catch (err) {
+      console.error('Payment error:', err);
+      toast.error('An error occurred during payment initiation');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDocCancelledRescheduleResponse = async (choice: 'keep' | 'cancel') => {
+    if (!appointmentWithDocCancel) return;
+
+    try {
+      setIsProcessingDocCancel(true);
+      const response = await apiClient.post(
+        `/patient/appointments/${appointmentWithDocCancel.id}/doctor-cancelled-reschedule-response`,
+        {
+          choice,
+          reason: docCancelReason,
+        }
+      );
+
+      if (response.success) {
+        toast.success(
+          choice === 'keep'
+            ? 'Appointment confirmed for original slot!'
+            : 'Appointment cancelled. Refund will be processed.'
+        );
+        setShowDocCancelledModal(false);
+        setAppointmentWithDocCancel(null);
+        setDocCancelReason('');
+        fetchAppointments();
+      } else {
+        toast.error(response.message || 'Failed to process response');
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'An error occurred');
+    } finally {
+      setIsProcessingDocCancel(false);
+    }
+  };
+
   useEffect(() => {
     if (selectedDoctor && selectedDate) {
-      fetchAvailableSlots();
+      // Basic format check before fetching
+      if (/^\d{4}-\d{2}-\d{2}$/.test(selectedDate)) {
+        fetchAvailableSlots();
+      } else {
+        setAvailableSlots([]);
+      }
     }
   }, [selectedDoctor, selectedDate]);
 
@@ -138,20 +446,39 @@ export default function AppointmentsPage() {
     try {
       setIsLoading(true);
 
-      // Fetch upcoming (REQUESTED, CONFIRMED) and past (COMPLETED, CANCELLED, NO_SHOW) separately
-      const [upcomingRes, pastRes] = await Promise.all([
-        apiClient.getPatientAppointments(upcomingPage, pageSize, 'REQUESTED,CONFIRMED'),
-        apiClient.getPatientAppointments(pastPage, pageSize, 'COMPLETED,CANCELLED,NO_SHOW'),
-      ]);
-
-      if (upcomingRes.success && upcomingRes.data) {
-        setUpcomingAppointments(upcomingRes.data.content || []);
-        setUpcomingTotalPages(upcomingRes.data.totalPages || 0);
+      // Fetch based on active tab
+      let statusFilter = '';
+      if (activeTab === 'confirmed') {
+        statusFilter = 'CONFIRMED';
+      } else if (activeTab === 'requested') {
+        statusFilter = 'REQUESTED';
+      } else if (activeTab === 'cancelled') {
+        statusFilter = 'CANCELLED';
+      } else if (activeTab === 'rescheduling') {
+        statusFilter = 'RESCHEDULE_REQUESTED';
       }
 
-      if (pastRes.success && pastRes.data) {
-        setPastAppointments(pastRes.data.content || []);
-        setPastTotalPages(pastRes.data.totalPages || 0);
+      const response = await apiClient.getPatientAppointments(currentPage, pageSize, statusFilter);
+
+      if (response.success && response.data) {
+        setAppointments(response.data.content || []);
+        setTotalPages(response.data.totalPages || 0);
+
+        // Check if any appointment has doctor cancelled reschedule request
+        const apptWithDocCancel = response.data.content?.find((apt: any) => apt.doctorCancelledRescheduleRequest);
+        if (apptWithDocCancel) {
+          setAppointmentWithDocCancel(apptWithDocCancel);
+          setShowDocCancelledModal(true);
+        } else {
+          // Check if any appointment is a doctor-requested reschedule
+          const apptWithDocReschedule = response.data.content?.find((apt: any) => 
+            apt.status === 'RESCHEDULE_REQUESTED' && apt.rescheduleRequestedBy === 'DOCTOR'
+          );
+          if (apptWithDocReschedule) {
+            setAppointmentWithDocCancel(apptWithDocReschedule);
+            setShowDocCancelledModal(true);
+          }
+        }
       }
     } catch (err) {
       toast.error('Failed to load appointments');
@@ -173,6 +500,30 @@ export default function AppointmentsPage() {
   };
 
   const fetchAvailableSlots = async () => {
+    // Validate date before fetching
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const selectedDateObj = new Date(selectedDate);
+    selectedDateObj.setHours(0, 0, 0, 0);
+
+    const minDate = new Date(today);
+    minDate.setDate(today.getDate() + 3);
+    const maxDate = new Date(today);
+    maxDate.setDate(today.getDate() + 30);
+
+    if (selectedDateObj < minDate || selectedDateObj > maxDate) {
+      setAvailableSlots([]);
+      return;
+    }
+
+    // Check if weekend
+    const dayOfWeek = selectedDateObj.getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      setAvailableSlots([]);
+      toast.error('Appointments are not available on weekends (Saturday & Sunday)');
+      return;
+    }
+
     try {
       setIsLoadingSlots(true);
       setSelectedSlot('');
@@ -193,6 +544,34 @@ export default function AppointmentsPage() {
 
     if (!selectedDoctor || !selectedDate || !selectedSlot || !reason) {
       toast.error('Please fill all required fields');
+      return;
+    }
+
+    // Explicit date validation
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const selectedDateObj = new Date(selectedDate);
+    selectedDateObj.setHours(0, 0, 0, 0);
+
+    const minDate = new Date(today);
+    minDate.setDate(today.getDate() + 3);
+    const maxDate = new Date(today);
+    maxDate.setDate(today.getDate() + 30);
+
+    if (selectedDateObj < minDate) {
+      toast.error('Appointments must be booked at least 3 days in advance');
+      return;
+    }
+
+    if (selectedDateObj > maxDate) {
+      toast.error('Appointments cannot be booked more than 30 days in advance');
+      return;
+    }
+
+    // Check if weekend
+    const dayOfWeek = selectedDateObj.getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      toast.error('Appointments are not available on weekends');
       return;
     }
 
@@ -230,227 +609,556 @@ export default function AppointmentsPage() {
     setAvailableSlots([]);
   };
 
-  const handleCancelClick = (apt: Appointment) => {
-    setSelectedAppointment(apt);
-    setCancelReason('');
-
-    // Check if this needs emergency cancellation
-    if (apt.status === 'CONFIRMED') {
-      const aptDate = new Date(apt.appointmentDate);
-      const now = new Date();
-      const daysDiff = Math.ceil((aptDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-      setIsEmergencyCancel(daysDiff < 3);
-    } else {
-      setIsEmergencyCancel(false);
-    }
-
-    setShowCancelModal(true);
-  };
-
-  const handleCancelConfirm = async () => {
-    if (!selectedAppointment || !cancelReason) {
-      toast.error('Please provide a reason for cancellation');
-      return;
-    }
-
-    try {
-      setIsSubmitting(true);
-      let response;
-
-      if (isEmergencyCancel) {
-        response = await apiClient.requestEmergencyCancellation(selectedAppointment.id, cancelReason);
-        if (response.success) {
-          toast.success('Emergency cancellation request submitted. Admin will review shortly.');
-        }
-      } else {
-        response = await apiClient.cancelPatientAppointment(selectedAppointment.id, cancelReason);
-        if (response.success) {
-          const refundAmount = response.data?.refundAmount || 0;
-          toast.success(`Appointment cancelled. ${refundAmount > 0 ? `Refund: Rs. ${refundAmount}` : ''}`);
-        }
-      }
-
-      setShowCancelModal(false);
-      fetchAppointments();
-    } catch (err: any) {
-      if (err.response?.data?.needsEmergencyCancellation) {
-        setIsEmergencyCancel(true);
-        toast.error('This appointment requires emergency cancellation approval');
-      } else {
-        toast.error(err.response?.data?.message || 'Failed to cancel appointment');
-      }
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handlePaymentClick = (apt: Appointment) => {
-    setSelectedAppointment(apt);
-    setShowPaymentModal(true);
-  };
-
-  const handlePaymentConfirm = async () => {
-    if (!selectedAppointment) return;
-
-    try {
-      setIsSubmitting(true);
-
-      // Create Stripe Checkout session and redirect
-      const response = await apiClient.createStripeCheckout(selectedAppointment.id);
-
-      if (response.success && response.data?.url) {
-        // Redirect to Stripe Checkout
-        window.location.href = response.data.url;
-      } else {
-        toast.error('Failed to create checkout session');
-      }
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Payment initialization failed');
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleDetailsClick = (apt: Appointment) => {
-    setSelectedAppointment(apt);
-    setShowDetailsModal(true);
-  };
-
-  const getStatusBadge = (status: string, paymentStatus?: string) => {
-    const badges: Record<string, { bg: string; text: string; label: string }> = {
-      REQUESTED: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'Requested' },
-      CONFIRMED: { bg: 'bg-emerald-100', text: 'text-emerald-700', label: paymentStatus === 'PAID' ? 'Confirmed' : 'Awaiting Payment' },
-      COMPLETED: { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Completed' },
-      CANCELLED: { bg: 'bg-red-100', text: 'text-red-700', label: 'Cancelled' },
-      NO_SHOW: { bg: 'bg-gray-100', text: 'text-gray-700', label: 'No Show' },
-    };
-    const badge = badges[status] || badges.REQUESTED;
-    return (
-      <span className={`px-3 py-1 rounded-full text-sm font-semibold ${badge.bg} ${badge.text}`}>
-        {badge.label}
-      </span>
-    );
-  };
-
   return (
     <ProtectedLayout allowedRoles={['PATIENT']}>
-      <div className="container-main py-8">
-        <div className="max-w-6xl mx-auto">
+      <div className="relative min-h-screen">
+        {/* 3D Background */}
+        <div className="fixed inset-0 z-0 pointer-events-none">
+          <Scene className="h-full w-full">
+            <FloatingIcons />
+          </Scene>
+        </div>
+
+        <div className="relative z-10 container-main py-12">
           {/* Header */}
-          <div className="mb-8 flex justify-between items-center">
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-12 flex flex-col md:flex-row justify-between items-start md:items-center gap-6"
+          >
             <div>
-              <h1 className="text-4xl font-bold text-slate-800 mb-2">Appointments</h1>
-              <p className="text-slate-600">Book and manage your medical appointments</p>
+              <h1 className="text-6xl font-black text-slate-800 tracking-tighter leading-none mb-4">
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-600 to-teal-500">Appointments</span>
+              </h1>
+              <p className="text-slate-500 font-bold uppercase tracking-widest text-sm flex items-center gap-2">
+                <Activity className="w-4 h-4 text-emerald-500" />
+                Book and manage your healthcare consultations
+              </p>
             </div>
             <button
               onClick={() => setShowBookForm(!showBookForm)}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3 px-6 rounded-xl transition shadow-lg hover:shadow-emerald-500/30"
+              className="px-8 py-4 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-black shadow-xl shadow-slate-900/20 transition-all active:scale-[0.98] flex items-center gap-2 group"
             >
-              {showBookForm ? 'Close Form' : 'Book Appointment'}
+              {showBookForm ? <X size={16} /> : <Plus size={16} className="group-hover:rotate-90 transition-transform" />}
+              {showBookForm ? 'Close Form' : 'New Appointment'}
             </button>
-          </div>
+          </motion.div>
 
-          {/* Book Appointment Form */}
-          {showBookForm && (
-            <div className="glass-card mb-8 p-8 animate-float-delayed">
-              <form onSubmit={handleBookAppointment} className="space-y-6">
-                <h3 className="text-xl font-bold text-slate-800 mb-4">Book New Appointment</h3>
-
-                {/* Appointment Type Toggle */}
-                <div className="flex gap-4 mb-4">
-                  <button
-                    type="button"
-                    onClick={() => setAppointmentType('OFFLINE')}
-                    className={`flex-1 py-3 px-4 rounded-xl border-2 transition flex items-center justify-center gap-2 ${appointmentType === 'OFFLINE'
-                      ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
-                      : 'border-slate-200 hover:border-slate-300'
-                      }`}
-                  >
-                    <MapPin size={20} />
-                    In-Person Visit
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAppointmentType('ONLINE')}
-                    className={`flex-1 py-3 px-4 rounded-xl border-2 transition flex items-center justify-center gap-2 ${appointmentType === 'ONLINE'
-                      ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
-                      : 'border-slate-200 hover:border-slate-300'
-                      }`}
-                  >
-                    <Video size={20} />
-                    Online Consultation
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Doctor Selection */}
-                  <div>
-                    <label className="block text-sm font-medium text-slate-600 mb-2">
-                      Select Doctor *
-                    </label>
-                    <select
-                      value={selectedDoctor}
-                      onChange={(e) => setSelectedDoctor(e.target.value)}
-                      className="w-full px-4 py-3 bg-white/50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 backdrop-blur-sm"
-                      required
-                    >
-                      <option value="">Choose a doctor</option>
-                      {doctors.map((doc) => (
-                        <option key={doc.id} value={doc.id}>
-                          Dr. {doc.name} - {doc.specialization}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Date Selection */}
-                  <div>
-                    <label className="block text-sm font-medium text-slate-600 mb-2">
-                      Appointment Date * <span className="text-xs text-slate-400">(3 - 30 days advance)</span>
-                    </label>
-                    <input
-                      type="date"
-                      value={selectedDate}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setSelectedDate(val);
-
-                        // Only show toast if it's a complete date and out of range
-                        if (val.length === 10) {
-                          if (val < minBookingDate || val > maxBookingDate) {
-                            toast.error(`Please select a date between ${minBookingDate} and ${maxBookingDate}`);
-                          }
-                        }
-                      }}
-                      min={minBookingDate}
-                      max={maxBookingDate}
-                      className="w-full px-4 py-3 bg-white/50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 backdrop-blur-sm"
-                      required
-                    />
-                  </div>
-                </div>
-
-                {/* Time Slots */}
-                {selectedDoctor && selectedDate && (
-                  <div>
-                    <label className="block text-sm font-medium text-slate-600 mb-2">
-                      Select Time Slot *
-                    </label>
-                    {isLoadingSlots ? (
-                      <div className="flex items-center justify-center py-8">
-                        <Spinner message="Loading available slots..." />
+          <AnimatePresence mode="wait">
+            {showBookForm && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="glass-card mb-12 p-10 border-white/60 shadow-2xl">
+                  <form onSubmit={handleBookAppointment} className="space-y-8">
+                    <div className="flex items-center gap-3 mb-8">
+                      <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center">
+                        <Calendar className="text-emerald-600" size={20} />
                       </div>
-                    ) : availableSlots.length === 0 ? (
-                      <p className="text-slate-500 py-4">No available slots for this date</p>
+                      <h3 className="text-2xl font-black text-slate-800 tracking-tight uppercase">Request Appointment</h3>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                      {/* Appointment Type */}
+                      <div className="space-y-4">
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Select Type</label>
+                        <div className="flex gap-4">
+                          <button
+                            type="button"
+                            onClick={() => setAppointmentType('OFFLINE')}
+                            className={`flex-1 py-4 px-6 rounded-2xl border transition-all flex items-center justify-center gap-3 font-bold text-xs uppercase tracking-widest ${appointmentType === 'OFFLINE'
+                              ? 'bg-slate-900 text-white border-slate-900 shadow-xl shadow-slate-900/10'
+                              : 'bg-white/40 text-slate-600 border-white/60 hover:bg-white/60'
+                              }`}
+                          >
+                            <MapPin size={16} />
+                            In-Person
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setAppointmentType('ONLINE')}
+                            className={`flex-1 py-4 px-6 rounded-2xl border transition-all flex items-center justify-center gap-3 font-bold text-xs uppercase tracking-widest ${appointmentType === 'ONLINE'
+                              ? 'bg-emerald-600 text-white border-emerald-600 shadow-xl shadow-emerald-600/10'
+                              : 'bg-white/40 text-slate-600 border-white/60 hover:bg-white/60'
+                              }`}
+                          >
+                            <Video size={16} />
+                            Video Call
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Doctor Selection */}
+                      <div>
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Choose Specialist</label>
+                        <select
+                          value={selectedDoctor}
+                          onChange={(e) => setSelectedDoctor(e.target.value)}
+                          className="w-full px-6 py-4 bg-white/40 backdrop-blur-md border border-white/60 rounded-2xl focus:outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 transition-all font-bold text-slate-700 appearance-none"
+                          required
+                        >
+                          <option value="">Select a Specialist</option>
+                          {doctors.map((doc) => (
+                            <option key={doc.id} value={doc.id}>
+                              Dr. {doc.name} - {doc.specialization}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Date Selection */}
+                      <div>
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Preferred Date</label>
+                        <input
+                          type="date"
+                          value={selectedDate}
+                          onChange={(e) => setSelectedDate(e.target.value)}
+                          min={minBookingDate}
+                          max={maxBookingDate}
+                          className="w-full px-6 py-4 bg-white/40 backdrop-blur-md border border-white/60 rounded-2xl focus:outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 transition-all font-bold text-slate-700"
+                          required
+                        />
+                        {selectedDate && (new Date(selectedDate).getDay() === 0 || new Date(selectedDate).getDay() === 6) && (
+                          <div className="mt-3 p-3 bg-red-100 border border-red-200 rounded-xl flex items-center gap-2 text-red-700 animate-pulse">
+                            <AlertCircle size={16} />
+                            <span className="text-xs font-black uppercase tracking-widest">Weekends are unavailable</span>
+                          </div>
+                        )}
+                        {!selectedDate || (new Date(selectedDate).getDay() !== 0 && new Date(selectedDate).getDay() !== 6) ? (
+                          <p className="mt-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Available from {new Date(minBookingDate).toLocaleDateString()} onwards (Mon-Fri)</p>
+                        ) : null}
+                      </div>
+
+                      {/* Slot Selection */}
+                      {selectedDoctor && selectedDate && (
+                        <div>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Available Slots</label>
+                          {(() => {
+                            const today = new Date();
+                            today.setHours(0, 0, 0, 0);
+                            const selectedDateObj = new Date(selectedDate);
+                            selectedDateObj.setHours(0, 0, 0, 0);
+
+                            const minDate = new Date(today);
+                            minDate.setDate(today.getDate() + 3);
+                            const maxDate = new Date(today);
+                            maxDate.setDate(today.getDate() + 30);
+
+                            const dayOfWeek = selectedDateObj.getDay();
+                            if (dayOfWeek === 0 || dayOfWeek === 6) {
+                              return <p className="text-red-500 text-[10px] font-black uppercase tracking-[0.2em]">Not available on weekends</p>;
+                            }
+
+                            if (selectedDateObj < minDate || selectedDateObj > maxDate) {
+                              return <p className="text-amber-600 text-[10px] font-black uppercase tracking-[0.2em]">Please select a date between {new Date(minBookingDate).toLocaleDateString()} and {new Date(maxBookingDate).toLocaleDateString()}</p>;
+                            }
+
+                            if (isLoadingSlots) {
+                              return (
+                                <div className="flex items-center gap-3 text-emerald-600 font-bold text-xs uppercase tracking-widest">
+                                  <Spinner size="sm" /> Loading Slots...
+                                </div>
+                              );
+                            }
+
+                            if (availableSlots.length === 0) {
+                              return <p className="text-red-500 text-[10px] font-black uppercase tracking-[0.2em]">No slots available for this date</p>;
+                            }
+
+                            return (
+                              <div className="grid grid-cols-3 gap-2">
+                                {availableSlots.map((slot) => (
+                                  <button
+                                    key={slot.time}
+                                    type="button"
+                                    onClick={() => setSelectedSlot(slot.time)}
+                                    className={`py-3 px-2 rounded-xl text-[10px] font-black uppercase tracking-tighter transition-all ${selectedSlot === slot.time
+                                      ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20'
+                                      : 'bg-white/40 border border-white/60 text-slate-600 hover:bg-white/60'
+                                      }`}
+                                  >
+                                    {slot.time}
+                                  </button>
+                                ))}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Reason */}
+                    <div>
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Symptoms or Reason for Consultation</label>
+                      <textarea
+                        value={reason}
+                        onChange={(e) => setReason(e.target.value)}
+                        placeholder="Please describe your health concern..."
+                        rows={3}
+                        className="w-full px-6 py-4 bg-white/40 backdrop-blur-md border border-white/60 rounded-2xl focus:outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 transition-all font-bold text-slate-700 resize-none"
+                        required
+                      />
+                    </div>
+
+                    {/* Fee Summary */}
+                    <div className="p-6 bg-emerald-500/5 rounded-2xl border border-emerald-500/10 flex items-center justify-between">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm">
+                          <CreditCard className="text-emerald-600" size={20} />
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Consultation Fee</p>
+                          <p className="text-xl font-black text-slate-800">Rs. 1,000</p>
+                        </div>
+                      </div>
+                      <p className="text-[9px] font-black text-emerald-600 uppercase tracking-widest text-right max-w-[150px]">
+                        Payment required after specialist approval
+                      </p>
+                    </div>
+
+                    <div className="flex gap-4 pt-4">
+                      <button
+                        type="submit"
+                        disabled={isSubmitting || !selectedSlot}
+                        className="px-10 py-5 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-black shadow-2xl shadow-slate-900/20 transition-all active:scale-[0.98] disabled:opacity-50"
+                      >
+                        {isSubmitting ? 'Processing Request...' : 'Send Appointment Request'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setShowBookForm(false); resetBookingForm(); }}
+                        className="px-10 py-5 bg-white/40 text-slate-600 border border-white/60 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-white/60 transition-all"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Tabbed Appointments Section */}
+          <div className="mb-12">
+            {/* Tabs Navigation */}
+            <div className="flex items-center gap-4 mb-8 flex-wrap">
+              <button
+                onClick={() => setActiveTab('confirmed')}
+                className={`px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'confirmed'
+                  ? 'bg-emerald-600 text-white shadow-xl shadow-emerald-600/20'
+                  : 'bg-white/40 text-slate-600 border border-white/60 hover:bg-white/60'
+                  }`}
+              >
+                Confirmed
+              </button>
+              <button
+                onClick={() => setActiveTab('requested')}
+                className={`px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'requested'
+                  ? 'bg-amber-600 text-white shadow-xl shadow-amber-600/20'
+                  : 'bg-white/40 text-slate-600 border border-white/60 hover:bg-white/60'
+                  }`}
+              >
+                Requested
+              </button>
+              <button
+                onClick={() => setActiveTab('cancelled')}
+                className={`px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'cancelled'
+                  ? 'bg-red-600 text-white shadow-xl shadow-red-600/20'
+                  : 'bg-white/40 text-slate-600 border border-white/60 hover:bg-white/60'
+                  }`}
+              >
+                Cancelled
+              </button>
+              <button
+                onClick={() => setActiveTab('rescheduling')}
+                className={`px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'rescheduling'
+                  ? 'bg-cyan-600 text-white shadow-xl shadow-cyan-600/20'
+                  : 'bg-white/40 text-slate-600 border border-white/60 hover:bg-white/60'
+                  }`}
+              >
+                Requests
+              </button>
+            </div>
+
+            {/* Appointments Content */}
+            {isLoading ? (
+              <div className="glass-card p-20 flex flex-col items-center justify-center border-white/40">
+                <Spinner size="lg" message="Loading appointments..." />
+              </div>
+            ) : appointments.length === 0 ? (
+              <EmptyState
+                icon={Calendar}
+                title={`No ${activeTab} appointments`}
+                message="Your schedule is clear"
+              />
+            ) : (
+              <div className="space-y-6">
+                {appointments.map((apt, i) => (
+                  <motion.div
+                    key={apt.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.05 }}
+                    className="glass-card p-8 border-white/60 bg-white/40 hover:bg-white/60 transition-all duration-500 relative"
+                  >
+                    {/* Status indicator bar */}
+                    <div className={`absolute top-0 left-0 w-1.5 h-full ${activeTab === 'confirmed' ? 'bg-emerald-500' :
+                      activeTab === 'requested' ? 'bg-amber-500' :
+                        activeTab === 'rescheduling' ? 'bg-cyan-500' :
+                          'bg-red-500'
+                      }`} />
+
+                    <div className="flex flex-col lg:flex-row gap-6">
+                      <div className={`w-16 h-16 rounded-2xl flex items-center justify-center font-black text-2xl shadow-sm flex-shrink-0 ${activeTab === 'confirmed' ? 'bg-emerald-100 text-emerald-700' :
+                        activeTab === 'requested' ? 'bg-amber-100 text-amber-700' :
+                          activeTab === 'rescheduling' ? 'bg-cyan-100 text-cyan-700' :
+                            'bg-red-100 text-red-700'
+                        }`}>
+                        {apt.doctorName?.charAt(0) || 'D'}
+                      </div>
+
+                      <div className="flex-1">
+                        <div className="flex flex-wrap items-center gap-3 mb-4">
+                          <h3 className="text-xl font-black text-slate-800 tracking-tight">
+                            Dr. {apt.doctorName}
+                          </h3>
+                          <span className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest ${apt.appointmentType === 'ONLINE' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-700'
+                            }`}>
+                            {apt.appointmentType}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                          <div className="flex items-center gap-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-white/50 px-3 py-2 rounded-xl">
+                            <Calendar size={14} className="text-emerald-500" />
+                            {new Date(apt.appointmentDate).toLocaleDateString(undefined, {
+                              month: 'short', day: 'numeric', year: 'numeric'
+                            })}
+                          </div>
+                          <div className="flex items-center gap-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-white/50 px-3 py-2 rounded-xl">
+                            <Clock size={14} className="text-emerald-500" />
+                            {apt.slotStartTime}
+                          </div>
+
+                          {/* Appointment Reason - Show for REQUESTED and RESCHEDULING tabs */}
+                          {(activeTab === 'requested' || activeTab === 'rescheduling') && apt.reason && (
+                            <div className="col-span-full flex items-start gap-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-emerald-50 px-3 py-2 rounded-xl">
+                              <AlertCircle size={14} className="text-emerald-500 mt-0.5 flex-shrink-0" />
+                              <div>
+                                <p className="text-emerald-600 font-black">Reason:</p>
+                                <p className="text-slate-700 normal-case font-medium mt-1">{apt.reason}</p>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Payment Status - Only for Confirmed Tab */}
+                          {activeTab === 'confirmed' && (
+                            <div className="flex items-center gap-3 text-[10px] font-bold uppercase tracking-widest bg-white/50 px-3 py-2 rounded-xl">
+                              <CreditCard size={14} className={apt.paymentStatus === 'PAID' ? 'text-emerald-500' : 'text-amber-500'} />
+                              <span className={apt.paymentStatus === 'PAID' ? 'text-emerald-600' : 'text-amber-600'}>
+                                {apt.paymentStatus === 'PAID' ? 'Paid' : 'Pending'}
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Cancellation Reason - Only for Cancelled Tab */}
+                          {activeTab === 'cancelled' && apt.cancellationReason && (
+                            <div className="col-span-full flex items-start gap-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-red-50 px-3 py-2 rounded-xl">
+                              <AlertCircle size={14} className="text-red-500 mt-0.5 flex-shrink-0" />
+                              <span className="text-red-600">{apt.cancellationReason}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Online Meeting Link */}
+                        {apt.appointmentType === 'ONLINE' && apt.meetingLink && activeTab === 'confirmed' && apt.paymentStatus === 'PAID' && canShowVideoConsultation(apt) && (
+                          <div className="mt-6">
+                            <a href={apt.meetingLink} target="_blank" rel="noopener noreferrer"
+                              className="inline-flex items-center gap-3 px-6 py-3 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20"
+                            >
+                              <Video size={14} /> Join Video Consultation
+                            </a>
+                          </div>
+                        )}
+
+                        {/* Pay Now Button */}
+                        {activeTab === 'confirmed' && apt.paymentStatus !== 'PAID' && (
+                          <div className="mt-6 p-6 bg-amber-50 rounded-2xl border border-amber-100 flex flex-col md:flex-row items-center justify-between gap-6">
+                            <div className="flex items-center gap-4">
+                              <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm">
+                                <CreditCard className="text-amber-600" size={20} />
+                              </div>
+                              <div>
+                                <p className="text-[10px] font-black text-amber-800 uppercase tracking-widest leading-tight">Action Required</p>
+                                <p className="text-sm font-bold text-slate-700 mt-1">Secure your appointment with payment</p>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => handlePayNow(apt.id)}
+                              disabled={isLoading}
+                              className="w-full md:w-auto px-8 py-4 bg-amber-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-amber-700 transition-all shadow-lg shadow-amber-600/20 active:scale-[0.98] flex items-center justify-center gap-2"
+                            >
+                              <CreditCard size={14} />
+                              {isLoading ? 'Processing...' : 'Pay Now'}
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Action Buttons */}
+                        {(activeTab === 'requested' || activeTab === 'confirmed' || activeTab === 'rescheduling') && (
+                          <div className="mt-6 flex flex-wrap items-center gap-4">
+                            {/* Reschedule Button */}
+                            {(activeTab === 'confirmed' || activeTab === 'rescheduling') && (
+                              <button
+                                onClick={() => openRescheduleModal(apt)}
+                                className="px-6 py-3 bg-cyan-100 hover:bg-cyan-200 text-cyan-700 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                              >
+                                {activeTab === 'rescheduling' ? 'Accept & Pick Time' : 'Reschedule'}
+                              </button>
+                            )}
+
+                            {/* Cancel Button */}
+                            {canCancelAppointment(apt) ? (
+                              <button
+                                onClick={() => {
+                                  setAppointmentToCancel(apt);
+                                  setCancelReason('');
+                                  setShowCancelModal(true);
+                                }}
+                                className="px-6 py-3 bg-red-100 hover:bg-red-200 text-red-700 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                              >
+                                Cancel Appointment
+                              </button>
+                            ) : (
+                              <button
+                                disabled
+                                title={getCancellationDisabledReason(apt)}
+                                className="px-6 py-3 bg-slate-100 text-slate-400 rounded-xl text-[10px] font-black uppercase tracking-widest opacity-50 cursor-not-allowed"
+                              >
+                                Cannot Cancel
+                              </button>
+                            )}
+                            {!canCancelAppointment(apt) && activeTab === 'confirmed' && (
+                              <span className="text-[9px] text-red-600 font-bold uppercase tracking-widest">
+                                {getCancellationDisabledReason(apt)}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+
+                {/* Pagination */}
+                {totalPages > 1 && (
+                  <div className="flex justify-center items-center gap-6 mt-12">
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.max(0, prev - 1))}
+                      disabled={currentPage === 0}
+                      className="px-6 py-3 bg-white/40 backdrop-blur-md rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-600 disabled:opacity-30 transition-all hover:bg-white/60"
+                    >
+                      Prev
+                    </button>
+                    <span className="text-slate-400 font-black text-[10px] uppercase tracking-[0.3em]">
+                      {currentPage + 1} / {totalPages}
+                    </span>
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.min(totalPages - 1, prev + 1))}
+                      disabled={currentPage >= totalPages - 1}
+                      className="px-6 py-3 bg-white/40 backdrop-blur-md rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-600 disabled:opacity-30 transition-all hover:bg-white/60"
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+
+      {/* Reschedule Modal */}
+      <AnimatePresence>
+        {showRescheduleModal && appointmentToReschedule && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="glass-card p-10 max-w-lg w-full border-white/60 shadow-2xl overflow-y-auto max-h-[90vh]"
+            >
+              <div className="flex justify-between items-start mb-8">
+                <div>
+                  <h2 className="text-2xl font-black text-slate-800 tracking-tight uppercase">Reschedule Appointment</h2>
+                  <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mt-1">
+                    Dr. {appointmentToReschedule.doctorName}
+                  </p>
+                </div>
+                <button onClick={() => setShowRescheduleModal(false)} className="p-2 hover:bg-slate-100 rounded-xl transition-colors">
+                  <X size={20} className="text-slate-400" />
+                </button>
+              </div>
+
+              {appointmentToReschedule.status === 'RESCHEDULE_REQUESTED' && (
+                <div className="mb-6 p-4 bg-cyan-50 border border-cyan-100 rounded-2xl">
+                  <p className="text-[10px] font-black text-cyan-800 uppercase tracking-widest mb-1">Doctor Request</p>
+                  <p className="text-sm font-bold text-slate-700">The doctor requested a reschedule. Pick a new time below. (Free of charge)</p>
+                </div>
+              )}
+
+              <form onSubmit={handleRescheduleSubmit} className="space-y-6">
+                {/* Date Selection */}
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">New Date</label>
+                  <input
+                    type="date"
+                    value={rescheduleDate}
+                    onChange={(e) => setRescheduleDate(e.target.value)}
+                    min={minBookingDate}
+                    max={maxBookingDate}
+                    className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 transition-all font-bold text-slate-700"
+                    required
+                  />
+                  {rescheduleDate && (new Date(rescheduleDate).getDay() === 0 || new Date(rescheduleDate).getDay() === 6) && (
+                    <div className="mt-3 p-3 bg-red-100 border border-red-200 rounded-xl flex items-center gap-2 text-red-700 animate-pulse">
+                      <AlertCircle size={16} />
+                      <span className="text-xs font-black uppercase tracking-widest">Weekends are unavailable</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Slot Selection */}
+                {rescheduleDate && (
+                  <div>
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Available Slots</label>
+                    {isLoadingRescheduleSlots ? (
+                      <div className="flex items-center gap-3 text-emerald-600 font-bold text-xs uppercase tracking-widest">
+                        <Spinner size="sm" /> Loading Slots...
+                      </div>
+                    ) : rescheduleAvailableSlots.length === 0 ? (
+                      <p className="text-red-500 text-[10px] font-black uppercase tracking-[0.2em]">No slots available</p>
                     ) : (
-                      <div className="grid grid-cols-4 md:grid-cols-7 gap-2">
-                        {availableSlots.map((slot) => (
+                      <div className="grid grid-cols-3 gap-2">
+                        {rescheduleAvailableSlots
+                          .filter((slot) => slot.time !== appointmentToReschedule.slotStartTime)
+                          .map((slot) => (
                           <button
                             key={slot.time}
                             type="button"
-                            onClick={() => setSelectedSlot(slot.time)}
-                            className={`py-2 px-3 rounded-lg text-sm font-medium transition ${selectedSlot === slot.time
-                              ? 'bg-emerald-600 text-white'
-                              : 'bg-white/70 border border-slate-200 hover:border-emerald-400 hover:bg-emerald-50'
+                            onClick={() => setRescheduleSlot(slot.time)}
+                            className={`py-3 px-2 rounded-xl text-[10px] font-black uppercase tracking-tighter transition-all ${rescheduleSlot === slot.time
+                              ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-600/20'
+                              : 'bg-slate-50 border border-slate-200 text-slate-600 hover:bg-white'
                               }`}
                           >
                             {slot.time}
@@ -463,432 +1171,247 @@ export default function AppointmentsPage() {
 
                 {/* Reason */}
                 <div>
-                  <label className="block text-sm font-medium text-slate-600 mb-2">
-                    Reason for Visit *
-                  </label>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Reason</label>
                   <textarea
-                    value={reason}
-                    onChange={(e) => setReason(e.target.value)}
-                    placeholder="Describe your symptoms or reason for consultation..."
-                    rows={3}
-                    className="w-full px-4 py-3 bg-white/50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 backdrop-blur-sm resize-none"
+                    value={rescheduleReason}
+                    onChange={(e) => setRescheduleReason(e.target.value)}
+                    placeholder="Why do you need to reschedule?"
+                    className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-4 focus:ring-cyan-500/10 focus:border-cyan-500 transition-all font-bold text-slate-700 min-h-[100px] resize-none"
                     required
                   />
                 </div>
 
-                {/* Fee Notice */}
-                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
-                  <CreditCard className="text-amber-600 mt-0.5" size={20} />
-                  <div>
-                    <p className="font-medium text-amber-800">Appointment Fee: Rs. 1,000</p>
-                    <p className="text-sm text-amber-700">Payment required after doctor confirms the appointment</p>
-                  </div>
-                </div>
-
-                <div className="flex gap-3 pt-4">
+                <div className="flex gap-4 pt-4">
                   <button
                     type="submit"
-                    disabled={isSubmitting || !selectedSlot}
-                    className="bg-emerald-600 text-white py-3 px-6 rounded-xl hover:bg-emerald-700 transition shadow-lg hover:shadow-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isSubmitting || !rescheduleSlot}
+                    className="flex-1 px-6 py-4 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-black shadow-xl shadow-slate-900/20 transition-all active:scale-[0.98] disabled:opacity-50"
                   >
-                    {isSubmitting ? 'Booking...' : 'Request Appointment'}
+                    {isSubmitting ? 'Confirming...' : 'Confirm Reschedule'}
                   </button>
                   <button
                     type="button"
-                    onClick={() => { setShowBookForm(false); resetBookingForm(); }}
-                    className="bg-slate-200 text-slate-700 py-3 px-6 rounded-xl hover:bg-slate-300 transition"
+                    onClick={() => setShowRescheduleModal(false)}
+                    className="flex-1 px-6 py-4 bg-white border border-slate-200 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all"
                   >
                     Cancel
                   </button>
                 </div>
               </form>
-            </div>
-          )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-          {/* Upcoming Appointments */}
-          <div className="mb-8">
-            <h2 className="text-2xl font-bold text-slate-800 mb-4">Upcoming Appointments</h2>
-            {isLoading ? (
-              <div className="glass-panel p-8 text-center">
-                <Spinner message="Loading appointments..." />
-              </div>
-            ) : upcomingAppointments.length === 0 ? (
-              <EmptyState
-                icon={Calendar}
-                title="No upcoming appointments"
-                message="Book an appointment to get started"
-              />
-            ) : (
-              <>
-                <div className="space-y-4">
-                  {upcomingAppointments.map((apt) => (
-                    <div
-                      key={apt.id}
-                      className={`glass-panel p-6 border-l-4 hover:shadow-lg transition-shadow ${apt.status === 'CONFIRMED' ? 'border-emerald-500' : 'border-amber-500'
-                        }`}
-                    >
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2">
-                            <h3 className="text-lg font-semibold text-slate-800">
-                              Dr. {apt.doctorName}
-                            </h3>
-                            {getStatusBadge(apt.status, apt.paymentStatus)}
-                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${apt.appointmentType === 'ONLINE'
-                              ? 'bg-blue-100 text-blue-700'
-                              : 'bg-slate-100 text-slate-700'
-                              }`}>
-                              {apt.appointmentType}
-                            </span>
-                          </div>
-                          <div className="space-y-2 text-slate-600">
-                            <div className="flex items-center gap-2">
-                              <Calendar size={18} className="text-emerald-600" />
-                              {new Date(apt.appointmentDate).toLocaleDateString('en-US', {
-                                weekday: 'long',
-                                year: 'numeric',
-                                month: 'long',
-                                day: 'numeric'
-                              })}
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Clock size={18} className="text-emerald-600" />
-                              {apt.slotStartTime} - {apt.slotEndTime}
-                            </div>
-                            {apt.appointmentType === 'OFFLINE' && (
-                              <div className="flex items-center gap-2">
-                                <MapPin size={18} className="text-emerald-600" />
-                                {apt.location || 'Healix Medical Center'}
-                              </div>
-                            )}
-                            {apt.appointmentType === 'ONLINE' && apt.meetingLink && (
-                              <div className="flex items-center gap-2">
-                                <Video size={18} className="text-blue-600" />
-                                <a href={apt.meetingLink} target="_blank" rel="noopener noreferrer"
-                                  className="text-blue-600 hover:underline">
-                                  Join Meeting
-                                </a>
-                              </div>
-                            )}
-                          </div>
-                          {apt.status === 'CONFIRMED' && apt.paymentStatus === 'PENDING' && apt.challanNumber && (
-                            <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                              <p className="text-sm text-amber-800">
-                                <strong>Payment Required</strong> - Challan: {apt.challanNumber}
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex flex-col gap-2">
-                          {apt.status === 'CONFIRMED' && apt.paymentStatus === 'PENDING' && (
-                            <button
-                              onClick={() => handlePaymentClick(apt)}
-                              className="px-4 py-2 bg-emerald-100 text-emerald-600 hover:bg-emerald-200 rounded-xl transition font-semibold flex items-center gap-2"
-                            >
-                              <CreditCard size={16} /> Pay Now
-                            </button>
-                          )}
-                          <button
-                            onClick={() => handleCancelClick(apt)}
-                            className="px-4 py-2 bg-red-100 text-red-600 hover:bg-red-200 rounded-xl transition font-semibold flex items-center gap-2"
-                          >
-                            <X size={16} /> Cancel
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+      {/* Doctor Cancelled Reschedule Modal */}
+      <AnimatePresence>
+        {showDocCancelledModal && appointmentWithDocCancel && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="glass-card p-10 max-w-lg w-full border-white/60 shadow-2xl overflow-y-auto max-h-[90vh]"
+            >
+              <div className="flex justify-between items-start mb-8">
+                <div>
+                  <h2 className="text-2xl font-black text-slate-800 tracking-tight uppercase">Action Required</h2>
+                  <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mt-1">
+                    {appointmentWithDocCancel?.doctorCancelledRescheduleRequest ? 'Doctor Cancelled Reschedule' : 'Doctor Reschedule Request'}
+                  </p>
                 </div>
-
-                {/* Pagination controls for upcoming appointments */}
-                {!isLoading && upcomingAppointments.length > 0 && upcomingTotalPages > 1 && (
-                  <div className="flex justify-center items-center gap-4 mt-6">
-                    <button
-                      onClick={() => setUpcomingPage(prev => Math.max(0, prev - 1))}
-                      disabled={upcomingPage === 0}
-                      className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition font-semibold"
-                    >
-                      Previous
-                    </button>
-                    <span className="text-gray-600 font-medium">
-                      Page {upcomingPage + 1} of {upcomingTotalPages}
-                    </span>
-                    <button
-                      onClick={() => setUpcomingPage(prev => Math.min(upcomingTotalPages - 1, prev + 1))}
-                      disabled={upcomingPage >= upcomingTotalPages - 1}
-                      className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition font-semibold"
-                    >
-                      Next
-                    </button>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-
-          {/* Past Appointments */}
-          {pastAppointments.length > 0 && (
-            <div>
-              <h2 className="text-2xl font-bold text-slate-800 mb-4">Past Appointments</h2>
-              <div className="space-y-4">
-                {pastAppointments.map((apt) => (
-                  <div
-                    key={apt.id}
-                    className={`glass-panel p-6 border-l-4 ${apt.status === 'COMPLETED' ? 'border-blue-500' : 'border-slate-300'
-                      } opacity-90`}
-                  >
-                    <div className="flex justify-between items-start">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <h3 className="text-lg font-semibold text-slate-800">
-                            Dr. {apt.doctorName}
-                          </h3>
-                          {getStatusBadge(apt.status)}
-                        </div>
-                        <div className="space-y-2 text-slate-600">
-                          <div className="flex items-center gap-2">
-                            <Calendar size={18} />
-                            {new Date(apt.appointmentDate).toLocaleDateString()}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Clock size={18} />
-                            {apt.slotStartTime}
-                          </div>
-                        </div>
-                        {apt.status === 'CANCELLED' && apt.cancellationReason && (
-                          <p className="mt-2 text-sm text-red-600">
-                            Cancelled by {apt.cancelledBy?.toLowerCase()}: {apt.cancellationReason}
-                          </p>
-                        )}
-                        {apt.refundAmount && apt.refundAmount > 0 && (
-                          <p className="mt-1 text-sm text-emerald-600">
-                            Refund: Rs. {apt.refundAmount}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex gap-2">
-                        {apt.status === 'COMPLETED' && (
-                          <>
-                            <button
-                              onClick={() => handleDetailsClick(apt)}
-                              className="px-4 py-2 bg-blue-100 text-blue-600 hover:bg-blue-200 rounded-xl transition font-semibold flex items-center gap-2"
-                            >
-                              <FileText size={16} /> Details
-                            </button>
-                            {apt.chatEnabled && (
-                              <button
-                                onClick={() => window.location.href = '/patient/chat'}
-                                className="px-4 py-2 bg-emerald-100 text-emerald-600 hover:bg-emerald-200 rounded-xl transition font-semibold flex items-center gap-2"
-                              >
-                                <MessageCircle size={16} /> Chat
-                              </button>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                <button onClick={() => setShowDocCancelledModal(false)} className="p-2 hover:bg-slate-100 rounded-xl transition-colors">
+                  <X size={20} className="text-slate-400" />
+                </button>
               </div>
 
-              {/* Pagination controls for past appointments */}
-              {!isLoading && pastAppointments.length > 0 && pastTotalPages > 1 && (
-                <div className="flex justify-center items-center gap-4 mt-6">
-                  <button
-                    onClick={() => setPastPage(prev => Math.max(0, prev - 1))}
-                    disabled={pastPage === 0}
-                    className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition font-semibold"
-                  >
-                    Previous
-                  </button>
-                  <span className="text-gray-600 font-medium">
-                    Page {pastPage + 1} of {pastTotalPages}
-                  </span>
-                  <button
-                    onClick={() => setPastPage(prev => Math.min(pastTotalPages - 1, prev + 1))}
-                    disabled={pastPage >= pastTotalPages - 1}
-                    className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition font-semibold"
-                  >
-                    Next
-                  </button>
-                </div>
+              {appointmentWithDocCancel?.doctorCancelledRescheduleRequest ? (
+                // Doctor cancelled reschedule request - old logic
+                <>
+                  <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-2xl">
+                    <p className="text-[10px] font-black text-red-800 uppercase tracking-widest mb-2">Reschedule Cancelled</p>
+                    <p className="text-sm font-bold text-slate-700 mb-2">
+                      Dr. {appointmentWithDocCancel.doctorName} cancelled the reschedule request.
+                    </p>
+                    <p className="text-xs text-slate-600">
+                      <strong>Reason:</strong> {appointmentWithDocCancel.doctorCancellationReason}
+                    </p>
+                  </div>
+
+                  <div className="mb-8 p-4 bg-slate-50 border border-slate-200 rounded-2xl">
+                    <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-3">Original Appointment</p>
+                    <div className="space-y-2 text-sm font-bold text-slate-700">
+                      <p>📅 {new Date(appointmentWithDocCancel.appointmentDate).toDateString()}</p>
+                      <p>🕐 {appointmentWithDocCancel.slotStartTime} - {appointmentWithDocCancel.slotEndTime}</p>
+                      {appointmentWithDocCancel.paymentStatus === 'PAID' && (
+                        <p className="text-emerald-600">💰 Paid: Rs. 1,000</p>
+                      )}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                // Doctor requested reschedule - new logic
+                <>
+                  <div className="mb-6 p-4 bg-amber-50 border border-amber-100 rounded-2xl">
+                    <p className="text-[10px] font-black text-amber-800 uppercase tracking-widest mb-2">Reschedule Request</p>
+                    <p className="text-sm font-bold text-slate-700 mb-2">
+                      Dr. {appointmentWithDocCancel.doctorName} has requested to reschedule your appointment.
+                    </p>
+                    <p className="text-xs text-slate-600">
+                      <strong>Reason:</strong> {appointmentWithDocCancel.rescheduleReason || 'Not provided'}
+                    </p>
+                  </div>
+
+                  <div className="mb-8 p-4 bg-slate-50 border border-slate-200 rounded-2xl">
+                    <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-3">Original Appointment</p>
+                    <div className="space-y-2 text-sm font-bold text-slate-700">
+                      <p>📅 {new Date(appointmentWithDocCancel.appointmentDate).toDateString()}</p>
+                      <p>🕐 {appointmentWithDocCancel.slotStartTime} - {appointmentWithDocCancel.slotEndTime}</p>
+                      {appointmentWithDocCancel.paymentStatus === 'PAID' && (
+                        <p className="text-emerald-600">💰 Paid: Rs. 1,000</p>
+                      )}
+                    </div>
+                  </div>
+                </>
               )}
-            </div>
-          )}
-        </div>
-      </div>
 
-      {/* Cancel Modal */}
-      {showCancelModal && selectedAppointment && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
-            <h3 className="text-xl font-bold text-slate-800 mb-4">
-              {isEmergencyCancel ? 'Emergency Cancellation Request' : 'Cancel Appointment'}
-            </h3>
+              <div className="space-y-4 mb-8">
+                <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Choose an option:</p>
+                
+                {/* Option 1: Keep */}
+                <div className="p-4 border-2 border-emerald-200 rounded-2xl bg-emerald-50 cursor-pointer hover:bg-emerald-100 transition-colors">
+                  <button
+                    onClick={() => handleDocCancelledRescheduleResponse('keep')}
+                    disabled={isProcessingDocCancel}
+                    className="w-full text-left disabled:opacity-50"
+                  >
+                    <p className="font-black text-emerald-700 mb-2">
+                      {appointmentWithDocCancel?.doctorCancelledRescheduleRequest ? '✓ Keep Original Slot' : '✓ Keep Original Appointment'}
+                    </p>
+                    <p className="text-xs text-emerald-600">
+                      {appointmentWithDocCancel?.doctorCancelledRescheduleRequest 
+                        ? 'Confirm your appointment for the original date and time. No changes will be made.'
+                        : 'Decline the reschedule request and keep your current appointment as is.'}
+                    </p>
+                  </button>
+                </div>
 
-            {isEmergencyCancel && (
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4">
-                <div className="flex items-start gap-2">
-                  <AlertCircle className="text-amber-600 mt-0.5" size={20} />
-                  <div>
-                    <p className="font-medium text-amber-800">Less than 3 days remaining</p>
-                    <p className="text-sm text-amber-700">Your request will be reviewed by admin. Full refund if approved.</p>
-                  </div>
+                {/* Option 2: Cancel */}
+                <div className="p-4 border-2 border-red-200 rounded-2xl bg-red-50 cursor-pointer hover:bg-red-100 transition-colors">
+                  <p className="font-black text-red-700 mb-2">
+                    {appointmentWithDocCancel?.doctorCancelledRescheduleRequest ? '✕ Cancel Completely' : '✕ Cancel Appointment'}
+                  </p>
+                  <p className="text-xs text-red-600 mb-3">
+                    {appointmentWithDocCancel?.doctorCancelledRescheduleRequest
+                      ? (appointmentWithDocCancel.paymentStatus === 'PAID'
+                        ? 'Appointment will be cancelled. Refund: Rs. 750 (Deduction: Rs. 250)'
+                        : 'Appointment will be cancelled.')
+                      : (appointmentWithDocCancel.paymentStatus === 'PAID'
+                        ? 'The appointment will be cancelled. You will receive a refund with deduction of Rs. 250.'
+                        : 'The appointment will be cancelled.')}
+                  </p>
+                  {appointmentWithDocCancel?.paymentStatus === 'PAID' && (
+                    <div className="mb-3">
+                      <label className="block text-[10px] font-black text-red-700 uppercase tracking-widest mb-2">Reason (optional)</label>
+                      <textarea
+                        value={docCancelReason}
+                        onChange={(e) => setDocCancelReason(e.target.value)}
+                        placeholder="Why are you cancelling?"
+                        className="w-full px-3 py-2 bg-white border border-red-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500 text-xs font-bold resize-none"
+                        rows={2}
+                      />
+                    </div>
+                  )}
+                  <button
+                    onClick={() => handleDocCancelledRescheduleResponse('cancel')}
+                    disabled={isProcessingDocCancel}
+                    className="w-full px-4 py-2 bg-red-600 text-white text-xs font-black rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
+                  >
+                    {isProcessingDocCancel ? 'Processing...' : 'Confirm ' + (appointmentWithDocCancel?.doctorCancelledRescheduleRequest ? 'Cancellation' : 'Cancellation')}
+                  </button>
                 </div>
               </div>
-            )}
 
-            {!isEmergencyCancel && selectedAppointment.paymentStatus === 'PAID' && (
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4">
-                <p className="text-sm text-blue-800">
-                  <strong>Refund Policy:</strong> Rs. 250 will be deducted. You will receive Rs. 750 refund.
+              <button
+                onClick={() => setShowDocCancelledModal(false)}
+                disabled={isProcessingDocCancel}
+                className="w-full px-6 py-3 bg-slate-100 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all disabled:opacity-50"
+              >
+                Close
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Cancel Appointment Modal */}
+      <AnimatePresence>
+        {showCancelModal && appointmentToCancel && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="glass-card p-10 max-w-md w-full border-white/60 shadow-2xl"
+            >
+              <div className="flex justify-between items-start mb-6">
+                <div>
+                  <h3 className="text-2xl font-black text-slate-800 tracking-tight uppercase">Cancel Appointment</h3>
+                  <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mt-1">With Dr. {appointmentToCancel.doctorName}</p>
+                </div>
+                <button onClick={() => { setShowCancelModal(false); setAppointmentToCancel(null); setCancelReason(''); }} className="p-2 hover:bg-slate-100 rounded-xl transition-colors">
+                  <X size={20} className="text-slate-400" />
+                </button>
+              </div>
+
+              <div className="mb-6 p-4 bg-red-50 rounded-2xl border border-red-100">
+                <p className="text-[10px] font-bold text-red-700 uppercase tracking-widest">
+                  ⚠ This action cannot be undone
                 </p>
               </div>
-            )}
 
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-slate-600 mb-2">
-                Reason for cancellation *
-              </label>
-              <textarea
-                value={cancelReason}
-                onChange={(e) => setCancelReason(e.target.value)}
-                placeholder="Please provide a reason..."
-                rows={3}
-                className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500 resize-none"
-                required
-              />
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                onClick={handleCancelConfirm}
-                disabled={isSubmitting || !cancelReason}
-                className="flex-1 bg-red-600 text-white py-3 rounded-xl hover:bg-red-700 transition disabled:opacity-50"
-              >
-                {isSubmitting ? 'Processing...' : isEmergencyCancel ? 'Submit Request' : 'Confirm Cancel'}
-              </button>
-              <button
-                onClick={() => setShowCancelModal(false)}
-                className="flex-1 bg-slate-200 text-slate-700 py-3 rounded-xl hover:bg-slate-300 transition"
-              >
-                Go Back
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Payment Modal */}
-      {showPaymentModal && selectedAppointment && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
-            <h3 className="text-xl font-bold text-slate-800 mb-4">Complete Payment</h3>
-
-            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-4">
-              <div className="flex justify-between mb-2">
-                <span className="text-slate-600">Consultation Fee</span>
-                <span className="font-bold text-slate-800">Rs. {selectedAppointment.paymentAmount}</span>
-              </div>
-              <p className="text-xs text-emerald-600">Secure payment via Stripe Checkout</p>
-            </div>
-
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="px-2 py-0.5 bg-blue-500 text-white text-xs font-bold rounded">STRIPE TEST MODE</span>
-              </div>
-              <p className="text-sm text-blue-700">
-                This demonstration uses Stripe Test Mode. You can use test cards (e.g., 4242 4242...) to complete this flow without a real transaction.
-              </p>
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                onClick={handlePaymentConfirm}
-                disabled={isSubmitting}
-                className="flex-[2] bg-emerald-600 text-white py-3 rounded-xl hover:bg-emerald-700 transition disabled:opacity-50 flex items-center justify-center gap-2 font-bold shadow-lg shadow-emerald-600/20"
-              >
-                {isSubmitting ? <Spinner size="sm" /> : <CreditCard size={18} />}
-                {isSubmitting ? 'Initializing...' : 'Proceed to Checkout'}
-              </button>
-              <button
-                onClick={() => setShowPaymentModal(false)}
-                className="flex-1 bg-slate-200 text-slate-700 py-3 rounded-xl hover:bg-slate-300 transition"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Details Modal */}
-      {showDetailsModal && selectedAppointment && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl max-h-[80vh] overflow-y-auto">
-            <div className="flex justify-between items-start mb-4">
-              <h3 className="text-xl font-bold text-slate-800">Appointment Details</h3>
-              <button onClick={() => setShowDetailsModal(false)} className="text-slate-400 hover:text-slate-600">
-                <X size={24} />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div className="bg-slate-50 rounded-xl p-4">
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div>
-                    <span className="text-slate-500">Doctor</span>
-                    <p className="font-medium">Dr. {selectedAppointment.doctorName}</p>
-                  </div>
-                  <div>
-                    <span className="text-slate-500">Date</span>
-                    <p className="font-medium">{new Date(selectedAppointment.appointmentDate).toLocaleDateString()}</p>
-                  </div>
-                  <div>
-                    <span className="text-slate-500">Time</span>
-                    <p className="font-medium">{selectedAppointment.slotStartTime}</p>
-                  </div>
-                  <div>
-                    <span className="text-slate-500">Type</span>
-                    <p className="font-medium">{selectedAppointment.appointmentType}</p>
-                  </div>
-                </div>
+              <div className="space-y-4 mb-8">
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
+                  Cancellation Reason
+                </label>
+                <textarea
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  placeholder="Please explain why you're cancelling this appointment..."
+                  rows={4}
+                  className="w-full px-6 py-4 bg-white/40 backdrop-blur-md border border-white/60 rounded-2xl focus:outline-none focus:ring-4 focus:ring-red-500/10 focus:border-red-500 transition-all font-bold text-slate-700 resize-none"
+                />
               </div>
 
-              {selectedAppointment.prescription && (
-                <div>
-                  <h4 className="font-semibold text-slate-800 mb-2 flex items-center gap-2">
-                    <FileText size={18} className="text-emerald-600" />
-                    Prescription
-                  </h4>
-                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 whitespace-pre-wrap text-sm">
-                    {selectedAppointment.prescription}
-                  </div>
-                </div>
-              )}
-
-              {selectedAppointment.instructions && (
-                <div>
-                  <h4 className="font-semibold text-slate-800 mb-2 flex items-center gap-2">
-                    <AlertCircle size={18} className="text-blue-600" />
-                    Doctor's Instructions
-                  </h4>
-                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 whitespace-pre-wrap text-sm">
-                    {selectedAppointment.instructions}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <button
-              onClick={() => setShowDetailsModal(false)}
-              className="w-full mt-6 bg-slate-200 text-slate-700 py-3 rounded-xl hover:bg-slate-300 transition"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      )}
+              <div className="flex gap-3">
+                <button
+                  onClick={handleCancelAppointment}
+                  disabled={isCancelling || !cancelReason.trim()}
+                  className="flex-1 px-6 py-4 bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-red-600/20 active:scale-[0.98]"
+                >
+                  {isCancelling ? 'Cancelling...' : 'Confirm Cancellation'}
+                </button>
+                <button
+                  onClick={() => { setShowCancelModal(false); setAppointmentToCancel(null); setCancelReason(''); }}
+                  className="flex-1 px-6 py-4 bg-white/40 text-slate-600 border border-white/60 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-white/60 transition-all"
+                >
+                  Keep Appointment
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </ProtectedLayout>
   );
 }

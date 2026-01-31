@@ -7,9 +7,11 @@ import {
     getDoctorNextDayScheduleController,
     confirmAppointmentController,
     cancelDoctorAppointmentController,
-    rescheduleAppointmentController,
+    requestRescheduleController,
+    rejectRescheduledAppointmentController,
     completeAppointmentController,
     markNoShowController,
+    requestDoctorEmergencyRescheduleController,
 } from '../controllers/appointmentController.js';
 import { authenticate, authorize } from '../middleware/auth.js';
 
@@ -35,9 +37,11 @@ router.get('/appointments/today', getDoctorDailyScheduleController);
 router.get('/appointments/tomorrow', getDoctorNextDayScheduleController);
 router.post('/appointments/:id/confirm', confirmAppointmentController);
 router.post('/appointments/:id/cancel', cancelDoctorAppointmentController);
-router.post('/appointments/:id/reschedule', rescheduleAppointmentController);
+router.post('/appointments/:id/request-reschedule', requestRescheduleController);
+router.post('/appointments/:id/reject-reschedule', rejectRescheduledAppointmentController);
 router.post('/appointments/:id/complete', completeAppointmentController);
 router.post('/appointments/:id/no-show', markNoShowController);
+router.post('/appointments/:id/request-emergency-reschedule', requestDoctorEmergencyRescheduleController);
 
 export default router;
 

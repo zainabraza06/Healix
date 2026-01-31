@@ -178,6 +178,22 @@ export const sendEmail = async (to, subject, htmlContent, actionUrl = null, acti
   }
 };
 
+/**
+ * Send email asynchronously without blocking the main operation
+ * Logs errors but doesn't throw them
+ */
+export const sendEmailAsync = (to, subject, htmlContent, actionUrl = null, actionText = null) => {
+  // Send email in background without awaiting
+  sendEmail(to, subject, htmlContent, actionUrl, actionText)
+    .catch((err) => {
+      console.error(`[EMAIL-ASYNC] Failed to send email to ${to}:`, err.message);
+      // Don't throw - just log the error
+    });
+  
+  return Promise.resolve(); // Return resolved promise immediately
+};
+
+
 // Verification email template
 export const sendVerificationEmail = async (email, token) => {
   const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${token}`;

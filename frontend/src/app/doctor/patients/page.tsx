@@ -4,9 +4,13 @@ import { useState, useEffect } from 'react';
 import { apiClient } from '@/lib/apiClient';
 import ProtectedLayout from '@/components/ProtectedLayout';
 import toast from 'react-hot-toast';
-import { User, Phone, MapPin, AlertCircle } from 'lucide-react';
-import Spinner from '@/components/Spinner';
-import EmptyState from '@/components/EmptyState';
+import { User, Phone, MapPin, AlertCircle, Search, Activity, ShieldCheck, Heart, Thermometer, Droplets } from 'lucide-react';
+import dynamic from 'next/dynamic';
+import { motion, AnimatePresence } from 'framer-motion';
+
+// 3D Background
+const Scene = dynamic(() => import('@/components/canvas/Scene'), { ssr: false });
+const FloatingIcons = dynamic(() => import('@/components/canvas/FloatingIcons'), { ssr: false });
 
 export default function DoctorPatientsPage() {
   const [patients, setPatients] = useState<any[]>([]);
@@ -60,76 +64,111 @@ export default function DoctorPatientsPage() {
 
   return (
     <ProtectedLayout allowedRoles={['DOCTOR']}>
-      <div className="min-h-screen bg-gray-50 p-4 md:p-8">
-          <div className="max-w-6xl mx-auto">
+      <div className="relative min-h-screen">
+        {/* 3D Background */}
+        <div className="fixed inset-0 z-0 pointer-events-none">
+          <Scene className="h-full w-full">
+            <FloatingIcons />
+          </Scene>
+        </div>
+
+        <div className="relative z-10 container-main py-12">
+          <div className="max-w-7xl mx-auto">
             {/* Header */}
-            <div className="mb-8">
-              <h1 className="text-4xl font-bold text-gray-800 mb-2">My Patients</h1>
-              <p className="text-gray-600">Manage and monitor your patients</p>
-            </div>
+            <motion.div
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-12"
+            >
+              <h1 className="text-6xl font-black text-slate-800 tracking-tighter leading-none mb-4">
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-600 to-teal-500">My Patients</span>
+              </h1>
+              <p className="text-slate-500 font-bold uppercase tracking-widest text-sm flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                Healthcare Directory & Monitoring
+              </p>
+            </motion.div>
 
             {/* Search */}
-            <div className="mb-8">
-              <input
-                type="text"
-                placeholder="Search by name or email..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 }}
+              className="mb-12"
+            >
+              <div className="relative group">
+                <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-emerald-500 transition-colors" size={20} />
+                <input
+                  type="text"
+                  placeholder="Search by name or email..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-14 pr-6 py-5 bg-white/40 backdrop-blur-md border border-white/60 rounded-3xl focus:outline-none focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500/50 transition-all font-bold text-slate-700 shadow-xl shadow-slate-200/20"
+                />
+              </div>
+            </motion.div>
 
             {/* Main Content */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
               {/* Patient List */}
-              <div className="lg:col-span-2">
+              <div className="lg:col-span-7">
                 {isLoading ? (
-                  <div className="card bg-white">
-                    <Spinner size="lg" message="Loading patients..." />
+                  <div className="glass-card p-20 flex flex-col items-center justify-center border-white/40">
+                    <div className="w-16 h-16 border-4 border-emerald-500/20 border-t-emerald-500 rounded-full animate-spin mb-6"></div>
+                    <p className="text-slate-400 font-black uppercase tracking-widest text-xs">Synchronizing Records...</p>
                   </div>
                 ) : error ? (
-                  <div className="card bg-red-50 border-2 border-red-200 flex items-center gap-3">
-                    <AlertCircle className="text-red-600" size={24} />
-                    <p className="text-red-700">{error}</p>
+                  <div className="glass-card p-8 border-red-200/50 bg-red-50/50 backdrop-blur-md flex items-center gap-4 animate-shake">
+                    <div className="p-3 bg-red-100 rounded-2xl">
+                      <AlertCircle className="text-red-600" size={24} />
+                    </div>
+                    <p className="text-red-700 font-bold uppercase tracking-widest text-xs">{error}</p>
                   </div>
                 ) : filteredPatients.length === 0 ? (
-                  <EmptyState
-                    icon={User}
-                    title="No patients found"
-                  />
+                  <div className="glass-card p-20 text-center border-white/40">
+                    <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                      <User size={40} className="text-slate-300" />
+                    </div>
+                    <p className="text-slate-400 font-black uppercase tracking-widest text-xs">No patients found</p>
+                  </div>
                 ) : (
                   <div className="space-y-4">
-                    {filteredPatients.map((patient) => (
-                      <div
+                    {filteredPatients.map((patient, i) => (
+                      <motion.div
                         key={patient.id}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: i * 0.05 }}
                         onClick={() => setSelectedPatient(patient)}
-                        className={`card cursor-pointer transition border-l-4 ${
-                          selectedPatient?.id === patient.id
-                            ? 'border-blue-600 bg-blue-50'
-                            : 'border-gray-300 hover:border-blue-600'
-                        }`}
+                        className={`glass-card p-6 cursor-pointer group transition-all duration-300 relative overflow-hidden ${selectedPatient?.id === patient.id
+                          ? 'border-emerald-500/50 ring-4 ring-emerald-500/5 bg-white/70 shadow-2xl scale-[1.02]'
+                          : 'border-white/60 bg-white/40 hover:bg-white/60'
+                          }`}
                       >
-                        <div className="flex justify-between items-start">
-                          <div className="flex-1">
-                            <h3 className="text-lg font-semibold text-gray-800 mb-2">
-                              {patient.firstName} {patient.lastName}
-                            </h3>
-                            <div className="space-y-1 text-gray-600 text-sm">
-                              <p className="flex items-center gap-2">
-                                <span className="font-medium">Email:</span> {patient.email}
-                              </p>
-                              {patient.phoneNumber && (
-                                <p className="flex items-center gap-2">
-                                  <Phone size={16} />
-                                  {patient.phoneNumber}
-                                </p>
-                              )}
-                              {patient.address && (
-                                <p className="flex items-center gap-2">
-                                  <MapPin size={16} />
-                                  {patient.address}
-                                </p>
-                              )}
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6">
+                          <div className="flex items-center gap-6">
+                            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center font-black text-xl transition-transform duration-500 group-hover:scale-110 ${selectedPatient?.id === patient.id
+                              ? 'bg-gradient-to-br from-emerald-500 to-teal-500 text-white shadow-lg'
+                              : 'bg-white/50 text-slate-400'
+                              }`}>
+                              {patient.firstName?.charAt(0) || 'P'}
+                            </div>
+                            <div>
+                              <h3 className="text-lg font-black text-slate-800 mb-1 tracking-tight">
+                                {patient.firstName} {patient.lastName}
+                              </h3>
+                              <div className="flex flex-wrap items-center gap-3 text-xs font-bold text-slate-400 uppercase tracking-widest">
+                                <span className="flex items-center gap-1.5 bg-slate-100/50 px-2 py-1 rounded-lg">
+                                  <Activity size={12} className="text-emerald-500" />
+                                  Active
+                                </span>
+                                {patient.phoneNumber && (
+                                  <span className="flex items-center gap-1.5">
+                                    <Phone size={12} />
+                                    {patient.phoneNumber}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </div>
                           <button
@@ -137,102 +176,122 @@ export default function DoctorPatientsPage() {
                               e.stopPropagation();
                               handleViewVitals(patient.id);
                             }}
-                            className="px-4 py-2 bg-blue-100 text-blue-600 hover:bg-blue-200 rounded-lg transition font-semibold text-sm"
+                            className={`px-5 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${selectedPatient?.id === patient.id
+                              ? 'bg-emerald-600 text-white'
+                              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                              }`}
                           >
                             View Vitals
                           </button>
                         </div>
-                      </div>
+                      </motion.div>
                     ))}
                   </div>
                 )}
               </div>
 
               {/* Patient Details */}
-              <div>
-                {selectedPatient ? (
-                  <div className="card bg-white sticky top-4">
-                    <h2 className="text-xl font-bold text-gray-800 mb-4">
-                      {selectedPatient.firstName} {selectedPatient.lastName}
-                    </h2>
-
-                    <div className="space-y-4">
-                      <div>
-                        <p className="text-sm text-gray-600">Email</p>
-                        <p className="font-semibold text-gray-800">{selectedPatient.email}</p>
+              <div className="lg:col-span-5">
+                <AnimatePresence mode="wait">
+                  {selectedPatient ? (
+                    <motion.div
+                      key={selectedPatient.id}
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.95 }}
+                      className="glass-card p-10 sticky top-4 border-white/60 shadow-2xl relative overflow-hidden group"
+                    >
+                      <div className="absolute top-0 right-0 p-8">
+                        <User className="text-emerald-500/10 w-24 h-24" />
                       </div>
 
-                      {selectedPatient.phoneNumber && (
-                        <div>
-                          <p className="text-sm text-gray-600">Phone</p>
-                          <p className="font-semibold text-gray-800">{selectedPatient.phoneNumber}</p>
-                        </div>
-                      )}
+                      <h2 className="text-3xl font-black text-slate-800 mb-8 tracking-tight">
+                        {selectedPatient.firstName} {selectedPatient.lastName}
+                      </h2>
 
-                      {selectedPatient.dateOfBirth && (
-                        <div>
-                          <p className="text-sm text-gray-600">Date of Birth</p>
-                          <p className="font-semibold text-gray-800">
-                            {new Date(selectedPatient.dateOfBirth).toLocaleDateString()}
-                          </p>
-                        </div>
-                      )}
-
-                      {selectedPatient.gender && (
-                        <div>
-                          <p className="text-sm text-gray-600">Gender</p>
-                          <p className="font-semibold text-gray-800">{selectedPatient.gender}</p>
-                        </div>
-                      )}
-
-                      {selectedPatient.address && (
-                        <div>
-                          <p className="text-sm text-gray-600">Address</p>
-                          <p className="font-semibold text-gray-800">{selectedPatient.address}</p>
-                        </div>
-                      )}
-
-                      {selectedPatient.vitals && (
-                        <div className="mt-6 pt-6 border-t-2 border-gray-200">
-                          <h3 className="font-semibold text-gray-800 mb-3">Latest Vitals</h3>
-                          <div className="space-y-2 text-sm">
-                            {selectedPatient.vitals.heartRate && (
-                              <div className="flex justify-between">
-                                <span className="text-gray-600">Heart Rate:</span>
-                                <span className="font-semibold">{selectedPatient.vitals.heartRate} bpm</span>
-                              </div>
-                            )}
-                            {selectedPatient.vitals.bloodPressure && (
-                              <div className="flex justify-between">
-                                <span className="text-gray-600">Blood Pressure:</span>
-                                <span className="font-semibold">{selectedPatient.vitals.bloodPressure}</span>
-                              </div>
-                            )}
-                            {selectedPatient.vitals.temperature && (
-                              <div className="flex justify-between">
-                                <span className="text-gray-600">Temperature:</span>
-                                <span className="font-semibold">{selectedPatient.vitals.temperature}°C</span>
-                              </div>
-                            )}
+                      <div className="space-y-8">
+                        <div className="grid grid-cols-2 gap-6">
+                          <div className="space-y-1">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Patient Email</p>
+                            <p className="font-bold text-slate-700">{selectedPatient.email}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Phone</p>
+                            <p className="font-bold text-slate-700">{selectedPatient.phoneNumber || 'Not provided'}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Age / DOB</p>
+                            <p className="font-bold text-slate-700">
+                              {selectedPatient.dateOfBirth ? new Date(selectedPatient.dateOfBirth).toLocaleDateString() : 'N/A'}
+                            </p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Gender</p>
+                            <p className="font-bold text-slate-700">{selectedPatient.gender || 'N/A'}</p>
                           </div>
                         </div>
-                      )}
 
-                      <button className="w-full mt-6 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition font-semibold">
-                        Create Prescription
-                      </button>
+                        <div className="space-y-1">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Registered Address</p>
+                          <p className="font-bold text-slate-700 flex items-start gap-2">
+                            <MapPin size={16} className="text-emerald-500 mt-0.5 shrink-0" />
+                            {selectedPatient.address || 'Address not listed'}
+                          </p>
+                        </div>
+
+                        {selectedPatient.vitals && (
+                          <div className="mt-12 pt-12 border-t border-slate-200/50">
+                            <h3 className="text-lg font-black text-slate-800 mb-6 flex items-center gap-3 tracking-tight uppercase">
+                              <Activity size={18} className="text-emerald-500" />
+                              Latest Clinical Vitals
+                            </h3>
+                            <div className="grid grid-cols-3 gap-4">
+                              <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100 flex flex-col items-center gap-2">
+                                <Heart className="text-emerald-600 w-5 h-5 mb-1" />
+                                <span className="text-[9px] font-black uppercase text-emerald-600 tracking-tighter">Heart Rate</span>
+                                <span className="text-lg font-black text-emerald-700">{selectedPatient.vitals.heartRate}</span>
+                                <span className="text-[8px] font-bold text-emerald-500 uppercase">BPM</span>
+                              </div>
+                              <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100 flex flex-col items-center gap-2">
+                                <Droplets className="text-blue-600 w-5 h-5 mb-1" />
+                                <span className="text-[9px] font-black uppercase text-blue-600 tracking-tighter">Blood Pressure</span>
+                                <span className="text-lg font-black text-blue-700">{selectedPatient.vitals.bloodPressure}</span>
+                                <span className="text-[8px] font-bold text-blue-500 uppercase">SYS/DIA</span>
+                              </div>
+                              <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100 flex flex-col items-center gap-2">
+                                <Thermometer className="text-amber-600 w-5 h-5 mb-1" />
+                                <span className="text-[9px] font-black uppercase text-amber-600 tracking-tighter">Temp</span>
+                                <span className="text-lg font-black text-amber-700">{selectedPatient.vitals.temperature}°C</span>
+                                <span className="text-[8px] font-bold text-amber-500 uppercase">Celsius</span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="pt-8">
+                          <button className="w-full bg-slate-900 text-white py-4 px-6 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] hover:bg-black shadow-xl shadow-slate-900/10 transition-all flex items-center justify-center gap-3 active:scale-[0.98]">
+                            <Activity size={16} />
+                            Generate Clinical Prescription
+                          </button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ) : (
+                    <div className="glass-card p-20 text-center border-white/40 flex flex-col items-center justify-center opacity-50 h-[600px]">
+                      <div className="w-24 h-24 bg-slate-100 rounded-3xl flex items-center justify-center mb-6">
+                        <User size={48} className="text-slate-300" />
+                      </div>
+                      <p className="text-slate-400 font-black uppercase tracking-[0.2em] text-xs max-w-[200px] leading-relaxed">
+                        Select a patient from the list to view comprehensive details
+                      </p>
                     </div>
-                  </div>
-                ) : (
-                  <div className="card bg-gray-50 text-center py-12">
-                    <User size={48} className="mx-auto text-gray-400 mb-4" />
-                    <p className="text-gray-600">Select a patient to view details</p>
-                  </div>
-                )}
+                  )}
+                </AnimatePresence>
               </div>
             </div>
           </div>
         </div>
+      </div>
     </ProtectedLayout>
   );
 }

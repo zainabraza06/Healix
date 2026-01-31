@@ -209,7 +209,7 @@ export const getDoctorDashboard = async (doctorId) => {
         const Appointment = mod.default;
         return await Appointment.countDocuments({
           doctor_id: doctorId,
-          scheduled_time: { $gte: todayStart, $lte: todayEnd },
+          appointment_date: { $gte: todayStart, $lte: todayEnd },
           status: { $ne: 'CANCELLED' }
         });
       }),
@@ -229,11 +229,17 @@ export const getDoctorDashboard = async (doctorId) => {
       return await Appointment.find({
         doctor_id: doctorId,
         status: 'CONFIRMED',
-        scheduled_time: { $gte: new Date() }
+        appointment_date: { $gte: new Date() }
       })
-        .sort({ scheduled_time: 1 })
+        .sort({ appointment_date: 1 })
         .limit(5)
-        .populate('patient_id', 'full_name email');
+        .populate({
+          path: 'patient_id',
+          populate: {
+            path: 'user_id',
+            select: 'full_name email'
+          }
+        });
     });
 
     // 3. Fetch Pending Requests
@@ -241,11 +247,36 @@ export const getDoctorDashboard = async (doctorId) => {
       const Appointment = mod.default;
       return await Appointment.find({
         doctor_id: doctorId,
-        status: 'PENDING'
+        status: 'REQUESTED'
       })
         .sort({ created_at: -1 })
         .limit(5)
-        .populate('patient_id', 'full_name email');
+        .populate({
+          path: 'patient_id',
+          populate: {
+            path: 'user_id',
+            select: 'full_name email'
+          }
+        });
+    });
+
+    // 3.5. Fetch Reschedule Requests from Patients
+    const rescheduleRequests = await import('../models/Appointment.js').then(async (mod) => {
+      const Appointment = mod.default;
+      return await Appointment.find({
+        doctor_id: doctorId,
+        status: 'RESCHEDULE_REQUESTED',
+        reschedule_requested_by: 'PATIENT'
+      })
+        .sort({ created_at: -1 })
+        .limit(5)
+        .populate({
+          path: 'patient_id',
+          populate: {
+            path: 'user_id',
+            select: 'full_name email'
+          }
+        });
     });
 
     // 4. Fetch Critical Alerts
@@ -257,7 +288,13 @@ export const getDoctorDashboard = async (doctorId) => {
       })
         .sort({ created_at: -1 })
         .limit(5)
-        .populate('patient_id', 'full_name email');
+        .populate({
+          path: 'patient_id',
+          populate: {
+            path: 'user_id',
+            select: 'full_name email'
+          }
+        });
     });
 
     // 5. Weekly Activity (last 7 days)
@@ -269,16 +306,16 @@ export const getDoctorDashboard = async (doctorId) => {
       dayStart.setHours(0, 0, 0, 0);
       const dayEnd = new Date(dayStart);
       dayEnd.setHours(23, 59, 59, 999);
-      
+
       const count = await import('../models/Appointment.js').then(async (mod) => {
         const Appointment = mod.default;
         return await Appointment.countDocuments({
           doctor_id: doctorId,
-          scheduled_time: { $gte: dayStart, $lte: dayEnd },
+          appointment_date: { $gte: dayStart, $lte: dayEnd },
           status: { $in: ['CONFIRMED', 'COMPLETED'] }
         });
       });
-      
+
       weeklyActivity.push({
         name: days[dayStart.getDay()],
         appointments: count
@@ -296,22 +333,32 @@ export const getDoctorDashboard = async (doctorId) => {
       upcomingAppointments: upcomingAppointments.map(apt => ({
         id: apt._id,
         patientId: apt.patient_id?._id,
-        patientName: apt.patient_id?.full_name,
-        scheduledTime: apt.scheduled_time,
+        patientName: apt.patient_id?.user_id?.full_name || 'Unknown Patient',
+        scheduledTime: apt.appointment_date,
         status: apt.status,
-        type: apt.type
+        type: apt.appointment_type
       })),
       pendingRequests: pendingRequests.map(req => ({
         id: req._id,
         patientId: req.patient_id?._id,
-        patientName: req.patient_id?.full_name,
-        scheduledTime: req.scheduled_time,
-        type: req.type
+        patientName: req.patient_id?.user_id?.full_name || 'Unknown Patient',
+        scheduledTime: req.appointment_date,
+        appointmentType: req.appointment_type,
+        createdAt: req.created_at
+      })),
+      rescheduleRequests: rescheduleRequests.map(req => ({
+        id: req._id,
+        patientId: req.patient_id?._id,
+        patientName: req.patient_id?.user_id?.full_name || 'Unknown Patient',
+        scheduledTime: req.appointment_date,
+        appointmentType: req.appointment_type,
+        rescheduleReason: req.reschedule_reason,
+        createdAt: req.created_at
       })),
       alerts: alerts.map(alert => ({
         id: alert._id,
         patientId: alert.patient_id?._id,
-        patientName: alert.patient_id?.full_name,
+        patientName: alert.patient_id?.user_id?.full_name || 'Unknown Patient',
         title: alert.title,
         message: alert.message,
         alertType: alert.alert_type,
@@ -378,7 +425,7 @@ export const getDoctorAlerts = async (doctorId, page = 0, size = 10, status) => 
     const Alert = (await import('../models/Alert.js')).default;
     const Prescription = (await import('../models/Prescription.js')).default;
     const query = { doctor_id: doctorId };
-    
+
     if (status) {
       query.status = status;
     }
@@ -442,7 +489,7 @@ export const resolveAlert = async (alertId, doctorId, instructions, prescription
   try {
     const Alert = (await import('../models/Alert.js')).default;
     const Prescription = (await import('../models/Prescription.js')).default;
-    
+
     const alert = await Alert.findById(alertId);
     if (!alert) {
       const err = new Error('Alert not found');
@@ -482,12 +529,12 @@ export const resolveAlert = async (alertId, doctorId, instructions, prescription
     // Update alert with resolution
     alert.status = 'RESOLVED';
     alert.instructions = instructions;
-    alert.prescription = prescriptionData?.medications 
+    alert.prescription = prescriptionData?.medications
       ? JSON.stringify(prescriptionData.medications)
       : (prescriptionData?.notes || null);
     alert.prescription_id = prescriptionId;
     alert.resolved_at = new Date();
-    
+
     await alert.save();
 
     return await Alert.findById(alertId)

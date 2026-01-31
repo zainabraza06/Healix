@@ -250,7 +250,7 @@ export default function AdminDashboard() {
           {dashboardData && (
             <>
               {/* Stats Cards - Enhanced */}
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
                 <Link href="/admin/patients" className="glass-card p-6 hover:shadow-xl transition-shadow cursor-pointer block">
                   <div className="flex items-center gap-4">
                     <div className="w-12 h-12 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-xl flex items-center justify-center shadow-lg">
@@ -281,11 +281,17 @@ export default function AdminDashboard() {
                       <Clock className="w-6 h-6 text-white" />
                     </div>
                     <div>
-                      <p className="text-slate-500 text-sm font-medium">Total Appointments</p>
-                      <p className="text-3xl font-bold text-slate-800">{dashboardData.stats?.totalAppointments || 0}</p>
+                      <p className="text-slate-500 text-sm font-medium">Confirmed Apts</p>
+                      <p className="text-3xl font-bold text-slate-800">
+                        {dashboardData.appointmentStats?.find((s: any) => s.status === 'CONFIRMED' || s.status === 'confirmed')?._id ?
+                          dashboardData.appointmentStats.find((s: any) => s._id === 'CONFIRMED' || s._id === 'confirmed')?.count || 0 :
+                          dashboardData.appointmentStats?.find((s: any) => s.status === 'CONFIRMED' || s.status === 'confirmed')?.count || 0}
+                      </p>
                     </div>
                   </div>
                 </Link>
+
+               
 
                 <Link href="/admin/alerts" className="glass-card p-6 hover:shadow-xl transition-shadow cursor-pointer block">
                   <div className="flex items-center gap-4">
@@ -302,14 +308,13 @@ export default function AdminDashboard() {
                 <Link href="/admin/pending-doctors" className="glass-card p-6 hover:shadow-xl transition-shadow cursor-pointer block">
                   <div className="flex items-center gap-4">
                     <div className="w-12 h-12 bg-gradient-to-br from-amber-400 to-amber-600 rounded-xl flex items-center justify-center shadow-lg">
-                      <CheckCircle className="w-6 h-6 text-white" />
+                      <Activity className="w-6 h-6 text-white" />
                     </div>
                     <div>
-                      <p className="text-slate-500 text-sm font-medium">Pending Approvals</p>
+                      <p className="text-slate-500 text-sm font-medium">Pending Apps</p>
                       <p className="text-3xl font-bold text-slate-800">{dashboardData.stats?.pendingApprovals || 0}</p>
                     </div>
                   </div>
-                  <p className="text-xs text-amber-600 mt-2">Click to review</p>
                 </Link>
               </div>
 
@@ -609,11 +614,11 @@ export default function AdminDashboard() {
 
       {/* Alert Details Modal */}
       {selectedAlert && (
-        <div 
+        <div
           className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm"
           onClick={() => setSelectedAlert(null)}
         >
-          <div 
+          <div
             className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in duration-200"
             onClick={(e) => e.stopPropagation()}
           >
@@ -646,12 +651,12 @@ export default function AdminDashboard() {
             <div className="p-6 space-y-6">
               {(() => {
                 const lines = selectedAlert.message.split('\n').filter((l: string) => l.trim());
-                
+
                 // Extract Issues (line starting with "Issues:")
                 let issuesText = '';
                 let recsText = '';
                 let snapshotText = '';
-                
+
                 for (const line of lines) {
                   if (line.startsWith('Issues:')) {
                     issuesText = line.replace('Issues:', '').trim();
@@ -661,13 +666,13 @@ export default function AdminDashboard() {
                     snapshotText = line.replace('Snapshot:', '').trim();
                   }
                 }
-                
+
                 // Parse issues (separated by semicolon)
                 const issues = issuesText
                   .split(';')
                   .map((i: string) => i.trim())
                   .filter((i: string) => i.length > 0);
-                
+
                 // Parse recommendations (separated by pipe)
                 const recs = recsText
                   .split('|')
@@ -683,7 +688,7 @@ export default function AdminDashboard() {
                           <CheckCircle className="w-6 h-6 text-emerald-600" />
                           <h4 className="text-xl font-bold text-emerald-800">Alert Resolved</h4>
                         </div>
-                        
+
                         {selectedAlert?.instructions && (
                           <div className="bg-emerald-50 p-6 rounded-2xl border-2 border-emerald-200">
                             <div className="flex items-center gap-2 mb-3">
@@ -738,7 +743,7 @@ export default function AdminDashboard() {
                           <p className="text-[10px] text-white/80 font-semibold mt-1">ID: {selectedAlert.doctor_id._id}</p>
                         )}
                         <div className="mt-3 pt-3 border-t border-white/20 text-[10px] font-bold uppercase tracking-widest opacity-80">
-                          {selectedAlert.resolved_at 
+                          {selectedAlert.resolved_at
                             ? `Resolved: ${new Date(selectedAlert.resolved_at).toLocaleDateString()}`
                             : 'Status: In Assessment'}
                         </div>
