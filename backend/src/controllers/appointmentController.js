@@ -1,3 +1,31 @@
+/**
+ * Approve reschedule-requested appointment (Doctor accepts patient-proposed reschedule)
+ */
+export const approveRescheduleRequestedAppointmentController = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+
+        const doctor = await Doctor.findOne({ user_id: req.user._id });
+        if (!doctor) {
+            return res.status(404).json(errorResponse('Doctor profile not found'));
+        }
+
+        const appointment = await approveRescheduleRequestedAppointment(id, doctor._id);
+
+        await logSuccess({
+            req,
+            userId: req.user._id,
+            action: 'APPROVE_RESCHEDULE',
+            entityType: 'APPOINTMENT',
+            entityId: id,
+            description: 'Doctor approved patient-proposed reschedule',
+        });
+
+        res.json(successResponse('Reschedule approved', appointment));
+    } catch (error) {
+        next(error);
+    }
+};
 import {
     getAvailableSlots,
     requestAppointment,
@@ -21,6 +49,7 @@ import {
     cleanupExpiredRequests,
     requestRescheduleByDoctor,
     rescheduleAppointmentByPatient,
+    approveRescheduleRequestedAppointment,
 } from '../services/appointmentService.js';
 import Patient from '../models/Patient.js';
 import Doctor from '../models/Doctor.js';
