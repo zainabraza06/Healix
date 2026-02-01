@@ -4,46 +4,94 @@ import Patient from '../models/Patient.js';
 import Doctor from '../models/Doctor.js';
 
 /**
+ * Calculate if a date is within one week from now
+ */
+const isWithinOneWeek = (date) => {
+  if (!date) return false;
+  const now = new Date();
+  const targetDate = new Date(date);
+  const oneWeekFromTarget = new Date(targetDate.getTime() + 7 * 24 * 60 * 60 * 1000);
+  return now <= oneWeekFromTarget;
+};
+
+/**
  * Verify whether chat is allowed between a patient and doctor.
  * Conditions:
- * - There exists an appointment between the patient and doctor (past or upcoming),
- *   where status is not CANCELLED, or upcoming appointment_date >= now.
- * - OR there is an ACTIVE CRITICAL alert for the patient that is linked to the doctor (doctor_id) and not expired.
+ * 1. ACTIVE alert with the doctor - allowed
+ * 2. RESOLVED alert with the doctor - allowed for 1 week after resolved_at
+ * 3. COMPLETED/PAST appointment with the doctor - allowed for 1 week after appointment_date
+ * 
+ * Returns: { allowed: boolean, reason?: string }
  */
 export const isChatAllowed = async (patientId, doctorId) => {
-  const now = new Date();
-
   // If either id missing, deny immediately
-  if (!patientId || !doctorId) return false;
+  if (!patientId || !doctorId) {
+    return { allowed: false, reason: 'Invalid patient or doctor ID' };
+  }
 
-  // Check appointment relationship
-  const appointment = await Appointment.findOne({
+  // 1. Check for ACTIVE alerts
+  const activeAlert = await Alert.findOne({
     patient_id: patientId,
     doctor_id: doctorId,
-    $or: [
-      { status: { $in: ['PENDING', 'CONFIRMED', 'COMPLETED'] } },
-      { appointment_date: { $gte: now }, status: { $ne: 'CANCELLED' } },
-    ],
-  }).lean();
-
-  if (appointment) return true;
-
-  // Check critical alert consultation linkage
-  const alert = await Alert.findOne({
-    patient_id: patientId,
-    doctor_id: doctorId,
-    alert_type: 'CRITICAL',
     status: 'ACTIVE',
-    $or: [
-      { expires_at: { $exists: false } },
-      { expires_at: { $gte: now } },
-    ],
   }).lean();
 
-  if (alert) return true;
+  if (activeAlert) {
+    return { allowed: true, reason: 'Active alert consultation' };
+  }
 
-  // Fallback: allow patient-initiated chat even without linked appointment/alert
-  return true;
+  // 2. Check for RESOLVED alerts within 1 week
+  const resolvedAlert = await Alert.findOne({
+    patient_id: patientId,
+    doctor_id: doctorId,
+    status: 'RESOLVED',
+    resolved_at: { $exists: true },
+  }).sort({ resolved_at: -1 }).lean();
+
+  if (resolvedAlert && isWithinOneWeek(resolvedAlert.resolved_at)) {
+    return { allowed: true, reason: 'Resolved alert - chat available for 1 week' };
+  }
+
+  // 3. Check for COMPLETED or past appointments within 1 week
+  const completedAppointment = await Appointment.findOne({
+    patient_id: patientId,
+    doctor_id: doctorId,
+    status: { $in: ['COMPLETED', 'PAST'] },
+  }).sort({ appointment_date: -1 }).lean();
+
+  if (completedAppointment && isWithinOneWeek(completedAppointment.appointment_date)) {
+    return { allowed: true, reason: 'Completed appointment - chat available for 1 week' };
+  }
+
+  // Check if there was a resolved alert but expired
+  if (resolvedAlert && !isWithinOneWeek(resolvedAlert.resolved_at)) {
+    return { 
+      allowed: false, 
+      reason: 'Chat window expired. Alert was resolved more than 1 week ago.' 
+    };
+  }
+
+  // Check if there was a completed appointment but expired
+  if (completedAppointment && !isWithinOneWeek(completedAppointment.appointment_date)) {
+    return { 
+      allowed: false, 
+      reason: 'Chat window expired. Appointment was completed more than 1 week ago.' 
+    };
+  }
+
+  // No valid relationship found
+  return { 
+    allowed: false, 
+    reason: 'No active alert or recent completed appointment with this doctor.' 
+  };
+};
+
+/**
+ * Legacy function for backward compatibility - returns boolean only
+ */
+export const isChatAllowedSimple = async (patientId, doctorId) => {
+  const result = await isChatAllowed(patientId, doctorId);
+  return result.allowed;
 };
 
 /**

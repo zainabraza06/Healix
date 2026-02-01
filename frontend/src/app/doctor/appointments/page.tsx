@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { apiClient } from '@/lib/apiClient';
 import ProtectedLayout from '@/components/ProtectedLayout';
 import toast from 'react-hot-toast';
-import { Calendar, Clock, CheckCircle, Trash2, Edit3, X, Activity, DollarSign } from 'lucide-react';
+import { Calendar, Clock, CheckCircle, Trash2, Edit3, X, Activity, DollarSign, AlertCircle } from 'lucide-react';
 import Spinner from '@/components/Spinner';
 import EmptyState from '@/components/EmptyState';
 import Pagination from '@/components/Pagination';
@@ -1508,31 +1508,99 @@ export default function DoctorAppointmentsPage() {
                           transition={{ delay: i * 0.05 }}
                           className="glass-card p-8 border-white/40 bg-red-50/40 group hover:bg-red-50/60 transition-all duration-300"
                         >
-                          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
-                            <div className="flex items-center gap-6">
-                              <div className="w-16 h-16 bg-gradient-to-br from-red-100 to-pink-100 rounded-2xl flex items-center justify-center text-red-700 font-black text-2xl group-hover:scale-110 transition-transform duration-500 shadow-sm">
-                                {apt.patientName?.charAt(0) || 'P'}
+                          <div className="flex flex-col gap-6">
+                            {/* Header with patient info and cancelled by badge */}
+                            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                              <div className="flex items-center gap-6">
+                                <div className="w-16 h-16 bg-gradient-to-br from-red-100 to-pink-100 rounded-2xl flex items-center justify-center text-red-700 font-black text-2xl group-hover:scale-110 transition-transform duration-500 shadow-sm">
+                                  {apt.patientName?.charAt(0) || 'P'}
+                                </div>
+                                <div>
+                                  <h3 className="text-xl font-black text-slate-800 mb-2 tracking-tight">
+                                    {apt.patientName || 'Unknown Patient'}
+                                  </h3>
+                                  <p className="text-xs text-slate-500 font-medium">{apt.patientEmail}</p>
+                                </div>
                               </div>
-                              <div>
-                                <h3 className="text-xl font-black text-slate-800 mb-2 tracking-tight">
-                                  {apt.patientName || 'Unknown Patient'}
-                                </h3>
-                                <div className="flex flex-wrap items-center gap-4">
-                                  <span className="flex items-center gap-2 text-xs font-bold text-slate-500 uppercase tracking-widest bg-white/50 px-3 py-1.5 rounded-xl">
-                                    <Calendar size={14} className="text-red-600" />
-                                    {new Date(apt.appointmentDate).toLocaleDateString()}
-                                  </span>
-                                  <span className="flex items-center gap-2 text-xs font-bold text-slate-500 uppercase tracking-widest bg-white/50 px-3 py-1.5 rounded-xl">
-                                    <Clock size={14} className="text-red-600" />
-                                    {apt.slotStartTime}
+                              {/* Cancelled By Badge */}
+                              <div className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest ${
+                                apt.cancelledBy === 'PATIENT' 
+                                  ? 'bg-orange-100 text-orange-700 border border-orange-200' 
+                                  : apt.cancelledBy === 'DOCTOR'
+                                  ? 'bg-purple-100 text-purple-700 border border-purple-200'
+                                  : apt.cancelledBy === 'ADMIN'
+                                  ? 'bg-slate-100 text-slate-700 border border-slate-200'
+                                  : 'bg-red-100 text-red-700 border border-red-200'
+                              }`}>
+                                Cancelled by {apt.cancelledBy || 'Unknown'}
+                              </div>
+                            </div>
+
+                            {/* Appointment Details */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                              <div className="bg-white/60 rounded-xl p-4 border border-white/80">
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Scheduled Date</p>
+                                <div className="flex items-center gap-2">
+                                  <Calendar size={16} className="text-red-500" />
+                                  <span className="text-sm font-bold text-slate-700">
+                                    {new Date(apt.appointmentDate).toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}
                                   </span>
                                 </div>
-                                {apt.cancellationReason && (
-                                  <p className="mt-4 text-xs font-bold text-slate-400 uppercase tracking-wide leading-relaxed">
-                                    Reason: <span className="text-slate-600 normal-case font-medium">{apt.cancellationReason}</span>
-                                  </p>
-                                )}
                               </div>
+                              <div className="bg-white/60 rounded-xl p-4 border border-white/80">
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Time Slot</p>
+                                <div className="flex items-center gap-2">
+                                  <Clock size={16} className="text-red-500" />
+                                  <span className="text-sm font-bold text-slate-700">
+                                    {apt.slotStartTime} - {apt.slotEndTime}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="bg-white/60 rounded-xl p-4 border border-white/80">
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Cancelled On</p>
+                                <div className="flex items-center gap-2">
+                                  <AlertCircle size={16} className="text-red-500" />
+                                  <span className="text-sm font-bold text-slate-700">
+                                    {apt.cancelledAt ? new Date(apt.cancelledAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : 'N/A'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Original Reason & Cancellation Reason */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              {apt.reason && (
+                                <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
+                                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Original Appointment Reason</p>
+                                  <p className="text-sm text-slate-600">{apt.reason}</p>
+                                </div>
+                              )}
+                              {apt.cancellationReason && (
+                                <div className="bg-red-50 rounded-xl p-4 border border-red-100">
+                                  <p className="text-[10px] font-black text-red-400 uppercase tracking-widest mb-2">Cancellation Reason</p>
+                                  <p className="text-sm text-red-700">{apt.cancellationReason}</p>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Payment & Type Info */}
+                            <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-white/60">
+                              <span className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest ${
+                                apt.appointmentType === 'ONLINE' 
+                                  ? 'bg-blue-100 text-blue-700' 
+                                  : 'bg-emerald-100 text-emerald-700'
+                              }`}>
+                                {apt.appointmentType}
+                              </span>
+                              <span className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest ${
+                                apt.paymentStatus === 'REFUNDED' 
+                                  ? 'bg-green-100 text-green-700' 
+                                  : apt.paymentStatus === 'PARTIAL_REFUND'
+                                  ? 'bg-amber-100 text-amber-700'
+                                  : 'bg-slate-100 text-slate-600'
+                              }`}>
+                                {apt.paymentStatus === 'PARTIAL_REFUND' ? 'Partial Refund' : apt.paymentStatus || 'N/A'}
+                              </span>
                             </div>
                           </div>
                         </motion.div>

@@ -2145,6 +2145,7 @@ export const getDoctorAppointments = async (doctorId, status = null, date = null
       instructions: apt.prescription_id?.notes,
       cancelledBy: apt.cancelled_by,
       cancellationReason: apt.cancellation_reason,
+      cancelledAt: apt.cancelled_at,
       rescheduleReason: apt.reschedule_reason,
       rescheduleRequestedBy: apt.reschedule_requested_by,
       rescheduleRejected: apt.reschedule_rejected,

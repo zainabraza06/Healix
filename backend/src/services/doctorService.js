@@ -374,44 +374,155 @@ export const getDoctorDashboard = async (doctorId) => {
 };
 
 /**
+ * Get patient vitals history for a doctor
+ */
+export const getPatientVitalsForDoctor = async (patientId, doctorId) => {
+  try {
+    const Vitals = (await import('../models/Vitals.js')).default;
+    const Alert = (await import('../models/Alert.js')).default;
+    const Appointment = (await import('../models/Appointment.js')).default;
+
+    // Verify the doctor has a relationship with this patient (via alerts or appointments)
+    const [hasAlert, hasAppointment] = await Promise.all([
+      Alert.exists({ patient_id: patientId, doctor_id: doctorId }),
+      Appointment.exists({ patient_id: patientId, doctor_id: doctorId, status: { $in: ['CONFIRMED', 'COMPLETED', 'PAST'] } })
+    ]);
+
+    if (!hasAlert && !hasAppointment) {
+      throw new Error('You do not have access to this patient\'s vitals');
+    }
+
+    // Get latest vitals
+    const latestVitals = await Vitals.findOne({ patient_id: patientId })
+      .sort({ recorded_at: -1 })
+      .lean();
+
+    // Get vitals history (last 30 days)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const vitalsHistory = await Vitals.find({
+      patient_id: patientId,
+      recorded_at: { $gte: thirtyDaysAgo }
+    })
+      .sort({ recorded_at: -1 })
+      .limit(100)
+      .lean();
+
+    if (!latestVitals) {
+      return {
+        latest: null,
+        history: [],
+        message: 'No vitals recorded for this patient'
+      };
+    }
+
+    return {
+      heartRate: latestVitals.heartRate,
+      bloodPressure: `${latestVitals.systolicBP}/${latestVitals.diastolicBP}`,
+      systolicBP: latestVitals.systolicBP,
+      diastolicBP: latestVitals.diastolicBP,
+      oxygenLevel: latestVitals.oxygenLevel,
+      temperature: latestVitals.temperature,
+      respiratoryRate: latestVitals.respiratoryRate,
+      recordedAt: latestVitals.recorded_at,
+      status: latestVitals.notes?.status || 'NORMAL',
+      history: vitalsHistory.map(v => ({
+        heartRate: v.heartRate,
+        bloodPressure: `${v.systolicBP}/${v.diastolicBP}`,
+        oxygenLevel: v.oxygenLevel,
+        temperature: v.temperature,
+        respiratoryRate: v.respiratoryRate,
+        recordedAt: v.recorded_at,
+        status: v.notes?.status || 'NORMAL'
+      }))
+    };
+  } catch (error) {
+    throw new Error(`Failed to fetch patient vitals: ${error.message}`);
+  }
+};
+
+/**
  * Get all unique patients this doctor can chat with
- * Returns patients who have active alerts or confirmed appointments
+ * Returns patients who have active alerts or confirmed/completed/past appointments
  */
 export const getDoctorPatients = async (doctorId) => {
   try {
-    // Get unique patient IDs from alerts
+    // Get unique patient IDs from alerts (active or resolved)
     const alertPatients = await import('../models/Alert.js').then(async (mod) => {
       const Alert = mod.default;
       return await Alert.distinct('patient_id', {
         doctor_id: doctorId,
-        status: 'ACTIVE'
+        status: { $in: ['ACTIVE', 'RESOLVED'] }
       });
     });
 
-    // Get unique patient IDs from confirmed appointments
+    // Get unique patient IDs from appointments (confirmed, completed, or past)
     const appointmentPatients = await import('../models/Appointment.js').then(async (mod) => {
       const Appointment = mod.default;
       return await Appointment.distinct('patient_id', {
         doctor_id: doctorId,
-        status: 'CONFIRMED'
+        status: { $in: ['CONFIRMED', 'COMPLETED', 'PAST'] }
       });
     });
 
     // Combine and deduplicate patient IDs
     const uniquePatientIds = [...new Set([...alertPatients, ...appointmentPatients])];
 
-    // Fetch patient details
+    // Fetch patient details with full user info
     const Patient = (await import('../models/Patient.js')).default;
     const patients = await Patient.find({ _id: { $in: uniquePatientIds } })
-      .populate('user_id', 'full_name email')
+      .populate('user_id', 'full_name email phone date_of_birth gender blood_type address emergency_contact_name emergency_contact_phone')
       .lean();
 
-    return patients.map(p => ({
-      id: p._id.toString(),
-      user_id: p.user_id?._id?.toString(),
-      name: p.user_id?.full_name || 'Unknown Patient',
-      email: p.user_id?.email || ''
+    // Get appointment and alert counts for each patient
+    const Appointment = (await import('../models/Appointment.js')).default;
+    const Alert = (await import('../models/Alert.js')).default;
+
+    const patientData = await Promise.all(patients.map(async (p) => {
+      // Get counts
+      const [appointmentCount, alertCount, activeAlertCount] = await Promise.all([
+        Appointment.countDocuments({ 
+          patient_id: p._id, 
+          doctor_id: doctorId, 
+          status: { $in: ['CONFIRMED', 'COMPLETED', 'PAST'] } 
+        }),
+        Alert.countDocuments({ patient_id: p._id, doctor_id: doctorId }),
+        Alert.countDocuments({ patient_id: p._id, doctor_id: doctorId, status: 'ACTIVE' })
+      ]);
+
+      // Get last appointment date
+      const lastAppointment = await Appointment.findOne({ 
+        patient_id: p._id, 
+        doctor_id: doctorId,
+        status: { $in: ['COMPLETED', 'PAST'] }
+      }).sort({ appointment_date: -1 }).lean();
+
+      return {
+        id: p._id.toString(),
+        odlId: p._id.toString(),
+        user_id: p.user_id?._id?.toString(),
+        name: p.user_id?.full_name || 'Unknown Patient',
+        firstName: p.user_id?.full_name?.split(' ')[0] || 'Unknown',
+        lastName: p.user_id?.full_name?.split(' ').slice(1).join(' ') || '',
+        email: p.user_id?.email || '',
+        phoneNumber: p.user_id?.phone || '',
+        dateOfBirth: p.user_id?.date_of_birth || null,
+        gender: p.user_id?.gender || null,
+        address: p.user_id?.address || '',
+        bloodGroup: p.user_id?.blood_type || null,
+        emergencyContact: p.user_id?.emergency_contact_name 
+          ? `${p.user_id.emergency_contact_name} (${p.user_id.emergency_contact_phone || 'N/A'})`
+          : null,
+        appointmentCount,
+        alertCount,
+        activeAlertCount,
+        lastAppointmentDate: lastAppointment?.appointment_date || null,
+        hasActiveAlert: activeAlertCount > 0
+      };
     }));
+
+    return patientData;
   } catch (error) {
     throw new Error(`Failed to fetch doctor patients: ${error.message}`);
   }

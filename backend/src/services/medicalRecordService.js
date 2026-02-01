@@ -77,6 +77,120 @@ export const getPatientMedicalRecords = async (userId) => {
 };
 
 /**
+ * Get patient medical summary for doctor (high-level overview)
+ * Only returns data relevant to the doctor's relationship with the patient
+ */
+export const getPatientMedicalSummaryForDoctor = async (patientId, doctorId) => {
+    try {
+        const patient = await Patient.findById(patientId)
+            .populate('user_id', 'full_name email phone date_of_birth gender blood_type address emergency_contact_name emergency_contact_phone')
+            .lean();
+        if (!patient) throw new Error('Patient record not found');
+
+        // Get medical records
+        let records = await MedicalRecord.findOne({ patient_id: patient._id }).lean();
+        if (!records) {
+            records = {
+                immunizations: [],
+                allergies: [],
+                operations: [],
+                labResults: [],
+            };
+        }
+
+        // Get appointments with this doctor only
+        const appointments = await Appointment.find({ 
+            patient_id: patient._id, 
+            doctor_id: doctorId,
+            status: { $in: ['COMPLETED', 'PAST', 'CONFIRMED'] }
+        })
+            .populate('prescription_id')
+            .sort({ appointment_date: -1 })
+            .limit(10)
+            .lean();
+
+        // Get alerts with this doctor only
+        const alerts = await Alert.find({ 
+            patient_id: patient._id, 
+            doctor_id: doctorId 
+        })
+            .populate('prescription_id')
+            .sort({ created_at: -1 })
+            .limit(10)
+            .lean();
+
+        // Get prescriptions from completed appointments with this doctor
+        const prescriptions = await Prescription.find({
+            patient_id: patient._id,
+            doctor_id: doctorId
+        })
+            .sort({ issued_date: -1 })
+            .limit(10)
+            .lean();
+
+        return {
+            patient: {
+                id: patient._id,
+                name: patient.user_id?.full_name || 'Unknown',
+                email: patient.user_id?.email || '',
+                dateOfBirth: patient.user_id?.date_of_birth || null,
+                gender: patient.user_id?.gender || null,
+                bloodGroup: patient.user_id?.blood_type || null,
+                address: patient.user_id?.address || '',
+                phoneNumber: patient.user_id?.phone || '',
+                emergencyContact: patient.user_id?.emergency_contact_name 
+                    ? `${patient.user_id.emergency_contact_name} (${patient.user_id.emergency_contact_phone || 'N/A'})`
+                    : null
+            },
+            medicalInfo: {
+                allergies: records.allergies || [],
+                bloodGroup: patient.user_id?.blood_type || null,
+                chronicConditions: records.chronicConditions || [],
+            },
+            recentAppointments: appointments.map(a => ({
+                id: a._id,
+                date: a.appointment_date,
+                time: a.slot_start_time,
+                type: a.appointment_type,
+                status: a.status,
+                reason: a.reason,
+                notes: a.notes,
+                prescription: a.prescription_id ? {
+                    medications: a.prescription_id.medications,
+                    notes: a.prescription_id.notes
+                } : null
+            })),
+            recentAlerts: alerts.map(a => ({
+                id: a._id,
+                title: a.title,
+                message: a.message,
+                severity: a.severity,
+                status: a.status,
+                createdAt: a.created_at,
+                resolvedAt: a.resolved_at,
+                instructions: a.instructions,
+                prescription: a.prescription
+            })),
+            prescriptions: prescriptions.map(p => ({
+                id: p._id,
+                issuedDate: p.issued_date,
+                medications: p.medications,
+                notes: p.notes,
+                status: p.status
+            })),
+            statistics: {
+                totalAppointments: appointments.length,
+                totalAlerts: alerts.length,
+                activeAlerts: alerts.filter(a => a.status === 'ACTIVE').length,
+                totalPrescriptions: prescriptions.length
+            }
+        };
+    } catch (error) {
+        throw new Error(`Failed to fetch patient medical summary: ${error.message}`);
+    }
+};
+
+/**
  * Add a record entry (immunization, allergy, etc.)
  */
 export const addMedicalRecordEntry = async (userId, type, entryData) => {
