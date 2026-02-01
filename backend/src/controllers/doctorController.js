@@ -1,4 +1,5 @@
-import { getDoctorDashboard, requestDoctorStatusChange, getDoctorPatients, getDoctorAlerts, resolveAlert } from '../services/doctorService.js';
+import { getDoctorDashboard, requestDoctorStatusChange, getDoctorPatients, getDoctorAlerts, resolveAlert, getPatientVitalsForDoctor } from '../services/doctorService.js';
+import { getPatientMedicalSummaryForDoctor } from '../services/medicalRecordService.js';
 import { getIO } from '../config/socket.js';
 import Doctor from '../models/Doctor.js';
 import { successResponse, errorResponse } from '../utils/response.js';
@@ -134,6 +135,46 @@ export const resolveAlertController = async (req, res, next) => {
             console.error('Failed to emit alert:resolved socket event', emitErr);
         }
         res.json(successResponse('Alert resolved successfully', resolvedAlert));
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * Get patient medical summary for doctor
+ */
+export const getPatientMedicalSummaryController = async (req, res, next) => {
+    try {
+        const userId = req.user._id;
+        const { patientId } = req.params;
+
+        const doctor = await Doctor.findOne({ user_id: userId });
+        if (!doctor) {
+            return res.status(404).json(errorResponse('Doctor profile not found'));
+        }
+
+        const summary = await getPatientMedicalSummaryForDoctor(patientId, doctor._id);
+        res.json(successResponse('Patient medical summary retrieved successfully', summary));
+    } catch (error) {
+        next(error);
+    }
+};
+
+/**
+ * Get patient vitals for doctor
+ */
+export const getPatientVitalsController = async (req, res, next) => {
+    try {
+        const userId = req.user._id;
+        const { patientId } = req.params;
+
+        const doctor = await Doctor.findOne({ user_id: userId });
+        if (!doctor) {
+            return res.status(404).json(errorResponse('Doctor profile not found'));
+        }
+
+        const vitals = await getPatientVitalsForDoctor(patientId, doctor._id);
+        res.json(successResponse('Patient vitals retrieved successfully', vitals));
     } catch (error) {
         next(error);
     }

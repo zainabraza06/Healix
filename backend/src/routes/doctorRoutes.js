@@ -1,5 +1,5 @@
 import express from 'express';
-import { getDoctorDashboardController, requestStatusChangeController, getDoctorPatientsController, getDoctorAlertsController, resolveAlertController } from '../controllers/doctorController.js';
+import { getDoctorDashboardController, requestStatusChangeController, getDoctorPatientsController, getDoctorAlertsController, resolveAlertController, getPatientMedicalSummaryController, getPatientVitalsController } from '../controllers/doctorController.js';
 import {
     getDoctorAppointmentsController,
     getAppointmentRequestsController,
@@ -27,6 +27,8 @@ router.use(authorize('DOCTOR'));
 router.get('/dashboard', getDoctorDashboardController);
 router.post('/request-status-change', requestStatusChangeController);
 router.get('/patients', getDoctorPatientsController);
+router.get('/patients/:patientId/medical-summary', getPatientMedicalSummaryController);
+router.get('/patients/:patientId/vitals', getPatientVitalsController);
 
 // Alerts
 router.get('/alerts', getDoctorAlertsController);

@@ -17,8 +17,10 @@ router.get('/patient/:doctorId/history', authorize('PATIENT'), async (req, res, 
     const patient = await getPatientByUser(req.user._id);
     const doctorId = req.params.doctorId;
 
-    const allowed = await isChatAllowed(patient._id, doctorId);
-    if (!allowed) return res.status(403).json({ success: false, message: 'Chat not allowed.' });
+    const chatStatus = await isChatAllowed(patient._id, doctorId);
+    if (!chatStatus.allowed) {
+      return res.status(403).json({ success: false, message: chatStatus.reason || 'Chat not allowed.' });
+    }
 
     const messages = await Message.find({ doctor_id: doctorId, patient_id: patient._id })
       .sort({ created_at: 1 }).lean();
@@ -34,8 +36,10 @@ router.post('/patient/:doctorId/message', authorize('PATIENT'), async (req, res,
     const patient = await getPatientByUser(req.user._id);
     const doctorId = req.params.doctorId;
 
-    const allowed = await isChatAllowed(patient._id, doctorId);
-    if (!allowed) return res.status(403).json({ success: false, message: 'Chat not allowed.' });
+    const chatStatus = await isChatAllowed(patient._id, doctorId);
+    if (!chatStatus.allowed) {
+      return res.status(403).json({ success: false, message: chatStatus.reason || 'Chat not allowed.' });
+    }
 
     const { text } = req.body;
     const message = await Message.create({
@@ -81,8 +85,10 @@ router.get('/doctor/:patientId/history', authorize('DOCTOR'), async (req, res, n
     const doctor = await getDoctorByUser(req.user._id);
     const patientId = req.params.patientId;
 
-    const allowed = await isChatAllowed(patientId, doctor._id);
-    if (!allowed) return res.status(403).json({ success: false, message: 'Chat not allowed.' });
+    const chatStatus = await isChatAllowed(patientId, doctor._id);
+    if (!chatStatus.allowed) {
+      return res.status(403).json({ success: false, message: chatStatus.reason || 'Chat not allowed.' });
+    }
 
     const messages = await Message.find({ doctor_id: doctor._id, patient_id: patientId })
       .sort({ created_at: 1 }).lean();
@@ -98,8 +104,10 @@ router.post('/doctor/:patientId/message', authorize('DOCTOR'), async (req, res, 
     const doctor = await getDoctorByUser(req.user._id);
     const patientId = req.params.patientId;
 
-    const allowed = await isChatAllowed(patientId, doctor._id);
-    if (!allowed) return res.status(403).json({ success: false, message: 'Chat not allowed.' });
+    const chatStatus = await isChatAllowed(patientId, doctor._id);
+    if (!chatStatus.allowed) {
+      return res.status(403).json({ success: false, message: chatStatus.reason || 'Chat not allowed.' });
+    }
 
     const { text } = req.body;
     const message = await Message.create({
@@ -188,6 +196,25 @@ router.post('/messages/read', async (req, res, next) => {
     });
 
     res.json({ success: true, message: 'Messages marked as read', count: updated.modifiedCount });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Check if chat is allowed for patient with a specific doctor
+router.get('/patient/:doctorId/can-chat', authorize('PATIENT'), async (req, res, next) => {
+  try {
+    const patient = await getPatientByUser(req.user._id);
+    const doctorId = req.params.doctorId;
+
+    const chatStatus = await isChatAllowed(patient._id, doctorId);
+    res.json({ 
+      success: true, 
+      data: { 
+        allowed: chatStatus.allowed, 
+        reason: chatStatus.reason 
+      } 
+    });
   } catch (error) {
     next(error);
   }

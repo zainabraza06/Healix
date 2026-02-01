@@ -40,6 +40,8 @@ export default function ChatModal({ isOpen, onClose }: ChatModalProps) {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [isOnline, setIsOnline] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [chatNotAllowed, setChatNotAllowed] = useState<{ allowed: boolean; reason: string } | null>(null);
+  const [checkingEligibility, setCheckingEligibility] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const socketRef = useRef<any>(null);
   const typingTimeoutRef = useRef<any>(null);
@@ -263,7 +265,49 @@ export default function ChatModal({ isOpen, onClose }: ChatModalProps) {
     }
   };
 
+  // Handle contact selection with eligibility check for patients
+  const handleSelectContact = async (contact: any) => {
+    setChatNotAllowed(null);
+    
+    // For patients, check chat eligibility first
+    if (isPatient) {
+      try {
+        setCheckingEligibility(true);
+        const response = await apiClient.checkPatientChatEligibility(contact.id);
+        
+        if (response.success && response.data) {
+          if (!response.data.allowed) {
+            setChatNotAllowed(response.data);
+            setSelectedContact(contact);
+            return;
+          }
+        }
+      } catch (error: any) {
+        // If eligibility check fails with 403, extract the reason
+        if (error?.response?.status === 403) {
+          setChatNotAllowed({
+            allowed: false,
+            reason: error?.response?.data?.message || 'Chat not allowed with this doctor.'
+          });
+          setSelectedContact(contact);
+          return;
+        }
+        console.error("Failed to check chat eligibility", error);
+      } finally {
+        setCheckingEligibility(false);
+      }
+    }
+    
+    // Chat is allowed, proceed
+    setSelectedContact(contact);
+  };
+
   const fetchMessages = async (contactId: string) => {
+    // Skip fetching if chat is not allowed
+    if (chatNotAllowed && !chatNotAllowed.allowed) {
+      return;
+    }
+    
     try {
       setLoadingMessages(true);
       const response = isDoctor
@@ -442,6 +486,13 @@ export default function ChatModal({ isOpen, onClose }: ChatModalProps) {
                       {isDoctor ? "Patients with alerts or appointments will appear here" : "Available doctors will appear here"}
                     </p>
                   </div>
+                ) : checkingEligibility ? (
+                  <div className="flex justify-center items-center h-full">
+                    <div className="text-center">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600 mx-auto mb-3"></div>
+                      <p className="text-sm text-slate-500">Checking chat eligibility...</p>
+                    </div>
+                  </div>
                 ) : (
                   <div className="space-y-2">
                     <p className="text-xs font-bold text-slate-500 uppercase mb-3">
@@ -450,8 +501,9 @@ export default function ChatModal({ isOpen, onClose }: ChatModalProps) {
                     {contacts.map((contact) => (
                       <button
                         key={contact.id}
-                        onClick={() => setSelectedContact(contact)}
-                        className="w-full p-3 hover:bg-emerald-50 rounded-xl transition text-left border border-transparent hover:border-emerald-200"
+                        onClick={() => handleSelectContact(contact)}
+                        disabled={checkingEligibility}
+                        className="w-full p-3 hover:bg-emerald-50 rounded-xl transition text-left border border-transparent hover:border-emerald-200 disabled:opacity-50"
                       >
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center">
@@ -478,6 +530,7 @@ export default function ChatModal({ isOpen, onClose }: ChatModalProps) {
                     onClick={() => {
                       setSelectedContact(null);
                       setMessages([]);
+                      setChatNotAllowed(null);
                     }}
                     className="text-sm text-emerald-600 hover:text-emerald-700 font-medium"
                   >
@@ -485,27 +538,57 @@ export default function ChatModal({ isOpen, onClose }: ChatModalProps) {
                   </button>
                 </div>
 
-                {/* Messages */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50">
-                  {loadingMessages ? (
-                    <div className="flex justify-center items-center h-full">
-                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600"></div>
+                {/* Chat Not Allowed Message */}
+                {chatNotAllowed && !chatNotAllowed.allowed ? (
+                  <div className="flex-1 flex items-center justify-center p-6">
+                    <div className="text-center max-w-sm">
+                      <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <X className="w-8 h-8 text-red-500" />
+                      </div>
+                      <h3 className="text-lg font-bold text-slate-800 mb-2">Chat Not Available</h3>
+                      <p className="text-sm text-slate-600 mb-4">{chatNotAllowed.reason}</p>
+                      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-left">
+                        <p className="text-xs font-bold text-amber-700 uppercase tracking-widest mb-2">Chat Requirements</p>
+                        <ul className="text-xs text-slate-600 space-y-1.5">
+                          <li className="flex items-start gap-2">
+                            <span className="text-emerald-500 mt-0.5">•</span>
+                            <span>Active health alert with this doctor</span>
+                          </li>
+                          <li className="flex items-start gap-2">
+                            <span className="text-emerald-500 mt-0.5">•</span>
+                            <span>Resolved alert (within 1 week of resolution)</span>
+                          </li>
+                          <li className="flex items-start gap-2">
+                            <span className="text-emerald-500 mt-0.5">•</span>
+                            <span>Completed appointment (within 1 week)</span>
+                          </li>
+                        </ul>
+                      </div>
                     </div>
-                  ) : messages.length === 0 ? (
-                    <div className="text-center py-12">
-                      <MessageSquare className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                      <p className="text-slate-500 font-medium">No messages yet</p>
-                      <p className="text-xs text-slate-400 mt-1">Start a conversation</p>
-                    </div>
-                  ) : (
-                    messages.map((msg, idx) => {
-                      const myRole = isDoctor ? "DOCTOR" : "PATIENT";
-                      const isMine = msg.sender_role === myRole;
-                      return (
-                        <div
-                          key={idx}
-                          className={`flex ${isMine ? "justify-end" : "justify-start"}`}
-                        >
+                  </div>
+                ) : (
+                  <>
+                    {/* Messages */}
+                    <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50">
+                      {loadingMessages ? (
+                        <div className="flex justify-center items-center h-full">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600"></div>
+                        </div>
+                      ) : messages.length === 0 ? (
+                        <div className="text-center py-12">
+                          <MessageSquare className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                          <p className="text-slate-500 font-medium">No messages yet</p>
+                          <p className="text-xs text-slate-400 mt-1">Start a conversation</p>
+                        </div>
+                      ) : (
+                        messages.map((msg, idx) => {
+                          const myRole = isDoctor ? "DOCTOR" : "PATIENT";
+                          const isMine = msg.sender_role === myRole;
+                          return (
+                            <div
+                              key={idx}
+                              className={`flex ${isMine ? "justify-end" : "justify-start"}`}
+                            >
                           <div
                             className={`max-w-[75%] px-4 py-2 rounded-2xl ${
                               isMine
@@ -566,6 +649,8 @@ export default function ChatModal({ isOpen, onClose }: ChatModalProps) {
                     </button>
                   </div>
                 </div>
+                  </>
+                )}
               </>
             )}
           </div>

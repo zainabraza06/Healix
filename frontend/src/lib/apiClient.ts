@@ -207,6 +207,11 @@ class ApiClient {
   }
 
   // Chat (Patient)
+  async checkPatientChatEligibility(doctorId: string): Promise<ApiResponse<{ allowed: boolean; reason: string }>> {
+    const response = await this.client.get(`/chat/patient/${doctorId}/can-chat`);
+    return response.data;
+  }
+
   async getPatientChatHistory(doctorId: string): Promise<ApiResponse<any[]>> {
     const response = await this.client.get(`/chat/patient/${doctorId}/history`);
     return response.data;
@@ -309,6 +314,18 @@ class ApiClient {
 
   async getDoctorPatients(): Promise<ApiResponse<any>> {
     const response = await this.client.get('/doctor/patients');
+    return response.data;
+  }
+
+  async getPatientMedicalSummary(patientId: string): Promise<ApiResponse<any>> {
+    const response = await this.client.get(`/doctor/patients/${patientId}/medical-summary`);
+    return response.data;
+  }
+
+  async downloadPatientMedicalRecord(patientId: string): Promise<Blob> {
+    const response = await this.client.get(`/medical-records/${patientId}/download`, {
+      responseType: 'blob'
+    });
     return response.data;
   }
 
@@ -522,13 +539,6 @@ class ApiClient {
   async downloadPatients(format: 'csv' | 'json' | 'pdf' = 'csv', isActive?: 'true' | 'false' | 'active' | 'deactivated'): Promise<Blob> {
     const params = new URLSearchParams({ format, ...(isActive && { isActive }) });
     const response = await this.client.get(`/admin/patients/download?${params.toString()}`, {
-      responseType: 'blob',
-    });
-    return response.data as Blob;
-  }
-
-  async downloadPatientMedicalRecord(patientId: string): Promise<Blob> {
-    const response = await this.client.get(`/medical-records/${patientId}/download`, {
       responseType: 'blob',
     });
     return response.data as Blob;
