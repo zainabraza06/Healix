@@ -57,6 +57,54 @@ export const getAvailableSlots = async (doctorId, date) => {
     }));
 };
 
+const parseTimeToDate = (dateValue, timeStr) => {
+    if (!timeStr) return new Date(dateValue);
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    const dt = new Date(dateValue);
+    dt.setHours(hours || 0, minutes || 0, 0, 0);
+    return dt;
+};
+
+const getAppointmentEndDateTime = (appointment) => {
+    const endTime = appointment.slot_end_time || calculateEndTime(appointment.slot_start_time);
+    return parseTimeToDate(appointment.appointment_date, endTime);
+};
+
+const getTodayDateRange = () => {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+    return { startOfToday, endOfToday };
+};
+
+const getCurrentTimeString = () => {
+    const now = new Date();
+    return now.toTimeString().slice(0, 5);
+};
+
+const generateChallanNumber = () => `CH-${Date.now()}-${Math.floor(Math.random() * 9000 + 1000)}`;
+
+const markPastConfirmedAppointments = async () => {
+    const { startOfToday, endOfToday } = getTodayDateRange();
+    const currentTime = getCurrentTimeString();
+
+    await Appointment.updateMany(
+        {
+            status: 'CONFIRMED',
+            payment_status: 'PAID',
+            $or: [
+                { appointment_date: { $lt: startOfToday } },
+                {
+                    appointment_date: { $gte: startOfToday, $lte: endOfToday },
+                    slot_end_time: { $lte: currentTime },
+                },
+            ],
+        },
+        { $set: { status: 'PAST' } }
+    );
+};
+
 /**
  * Request a new appointment (Patient action)
  */
@@ -502,15 +550,8 @@ export const rejectRescheduledAppointment = async (appointmentId, doctorId, reas
         throw err;
     }
 
-    if (appointment.status !== 'REQUESTED') {
-        const err = new Error('Only requested appointments can be rejected');
-        err.statusCode = 400;
-        throw err;
-    }
-
-    // Check if this was a rescheduled appointment (has challan number from original)
-    if (!appointment.challan_number) {
-        const err = new Error('This is not a rescheduled appointment');
+    if (appointment.status !== 'RESCHEDULE_REQUESTED' || appointment.reschedule_requested_by !== 'PATIENT') {
+        const err = new Error('Only patient reschedule requests can be rejected');
         err.statusCode = 400;
         throw err;
     }
@@ -522,7 +563,6 @@ export const rejectRescheduledAppointment = async (appointmentId, doctorId, reas
     // Set a flag that this was rejected - patient will get options
     appointment.reschedule_rejected = true;
     appointment.reschedule_rejection_reason = reason;
-    // Keep status as REQUESTED to show in patient's requests tab with special handling
     await appointment.save();
 
     // Notify patient
@@ -773,7 +813,7 @@ export const cancelAppointmentByPatient = async (appointmentId, patientId, reaso
 
     // Check if more than 24 hours remaining
     const now = new Date();
-    const appointmentDateTime = new Date(appointment.appointment_date);
+    const appointmentDateTime = parseTimeToDate(appointment.appointment_date, appointment.slot_start_time);
     const hoursDiff = (appointmentDateTime - now) / (1000 * 60 * 60);
 
     // Logic 6: Patient CANNOT cancel if less than 24 hours remaining, NO emergency cancellation option
@@ -971,7 +1011,7 @@ export const cancelAppointmentByDoctor = async (appointmentId, doctorId, reason)
         }
 
         const now = new Date();
-        const appointmentDateTime = new Date(appointment.appointment_date);
+        const appointmentDateTime = parseTimeToDate(appointment.appointment_date, appointment.slot_start_time);
         const hoursDiff = (appointmentDateTime - now) / (1000 * 60 * 60);
 
         if (hoursDiff < MIN_DOCTOR_CANCEL_HOURS) {
@@ -1378,9 +1418,7 @@ export const cancelRescheduleRequestedByPatient = async (appointmentId, patientI
     return { appointment, refundAmount };
 };
 
-/**
- * Reschedule an appointment (Doctor)
- */
+
 /**
  * Request reschedule (Doctor) - Sets status to RESCHEDULE_REQUESTED
  */
@@ -1401,10 +1439,9 @@ export const requestRescheduleByDoctor = async (appointmentId, doctorId, reason)
         throw err;
     }
 
-    // Only CONFIRMED appointments can be rescheduled
-    // REQUESTED appointments should be cancelled/declined instead
-    if (appointment.status !== 'CONFIRMED') {
-        const err = new Error('Only confirmed appointments can be rescheduled. Please cancel/decline requested appointments instead.');
+    // Allow doctor reschedule for CONFIRMED or any RESCHEDULE_REQUESTED
+    if (appointment.status !== 'CONFIRMED' && appointment.status !== 'RESCHEDULE_REQUESTED') {
+        const err = new Error('Only confirmed or reschedule-requested appointments can be rescheduled by doctor.');
         err.statusCode = 400;
         throw err;
     }
@@ -1493,7 +1530,7 @@ export const rescheduleAppointmentByPatient = async (appointmentId, patientId, n
     // Check 24h constraint ONLY for PAID confirmed appointments
     if (appointment.status === 'CONFIRMED' && appointment.payment_status === 'PAID') {
         const now = new Date();
-        const appointmentDateTime = new Date(appointment.appointment_date);
+        const appointmentDateTime = parseTimeToDate(appointment.appointment_date, appointment.slot_start_time);
         const hoursDiff = (appointmentDateTime.getTime() - now.getTime()) / (1000 * 60 * 60);
 
         if (hoursDiff < 24) {
@@ -1534,10 +1571,15 @@ export const rescheduleAppointmentByPatient = async (appointmentId, patientId, n
     appointment.slot_end_time = calculateEndTime(newTime);
 
     // Status Logic for Patient Rescheduling:
-    // When patient reschedules a confirmed appointment, it becomes RESCHEDULE_REQUESTED
-    // for doctor to approve the new slot
-    appointment.status = 'RESCHEDULE_REQUESTED';
-    appointment.reschedule_requested_by = 'PATIENT';
+    // PAID confirmed appointments become RESCHEDULE_REQUESTED for doctor approval.
+    // UNPAID confirmed appointments are treated as new REQUESTED.
+    if (appointment.status === 'CONFIRMED' && appointment.payment_status !== 'PAID') {
+        appointment.status = 'REQUESTED';
+        appointment.reschedule_requested_by = undefined;
+    } else {
+        appointment.status = 'RESCHEDULE_REQUESTED';
+        appointment.reschedule_requested_by = 'PATIENT';
+    }
 
     // Append reason if provided
     if (reason) {
@@ -1563,7 +1605,7 @@ export const rescheduleAppointmentByPatient = async (appointmentId, patientId, n
         console.error('Failed to send email:', err);
     }
 
-    return appointment;;;
+    return appointment;
 };
 
 /**
@@ -1769,21 +1811,23 @@ export const completeAppointment = async (appointmentId, doctorId, medications, 
         throw err;
     }
 
-    if (appointment.status !== 'CONFIRMED') {
-        const err = new Error('Only confirmed appointments can be completed');
+    if (appointment.status !== 'CONFIRMED' && appointment.status !== 'PAST') {
+        const err = new Error('Only confirmed or past appointments can be completed');
         err.statusCode = 400;
         throw err;
     }
 
-    // Check if appointment date is in the past or today
     const now = new Date();
-    const appointmentDate = new Date(appointment.appointment_date);
-    appointmentDate.setHours(0, 0, 0, 0); // Start of appointment day
-    const today = new Date(now);
-    today.setHours(0, 0, 0, 0);
-    
-    if (appointmentDate > today) {
-        const err = new Error('Cannot complete future appointments');
+    const appointmentEnd = getAppointmentEndDateTime(appointment);
+
+    if (appointmentEnd > now) {
+        const err = new Error('Cannot complete appointment before it ends');
+        err.statusCode = 400;
+        throw err;
+    }
+
+    if (!instructions || !instructions.trim()) {
+        const err = new Error('Follow-up instructions are required');
         err.statusCode = 400;
         throw err;
     }
@@ -1793,7 +1837,7 @@ export const completeAppointment = async (appointmentId, doctorId, medications, 
         patient_id: appointment.patient_id._id,
         doctor_id: appointment.doctor_id._id,
         appointment_id: appointment._id,
-        medications: medications,
+        medications: Array.isArray(medications) ? medications : [],
         notes: instructions, // Using instructions as notes
     });
 
@@ -1811,7 +1855,7 @@ export const completeAppointment = async (appointmentId, doctorId, medications, 
         if (patientUserId) {
             io.to(`user:${patientUserId}`).emit('appointment:completed', {
                 appointmentId: appointment._id,
-                prescription,
+                prescription: prescriptionRecord,
                 instructions,
                 chatEnabled: true,
             });
@@ -1822,22 +1866,33 @@ export const completeAppointment = async (appointmentId, doctorId, medications, 
 
     // Send completion email
     try {
-        const patientEmail = appointment.patient_id.user_id?.email;
-        if (patientEmail) {
-            const content = `
-        <p>Your appointment has been completed. Here are the details:</p>
-        <div class="success">
-          <strong>Doctor:</strong> Dr. ${appointment.doctor_id.user_id?.full_name}<br/>
-          <strong>Date:</strong> ${appointment.appointment_date.toDateString()}
-        </div>
-        <h3>Prescription</h3>
-        <p>${prescription || 'No prescription provided'}</p>
-        <h3>Instructions</h3>
-        <p>${instructions || 'No special instructions'}</p>
-        <p>You can now chat with the doctor for any follow-up questions.</p>
-      `;
-            await sendEmail(patientEmail, 'Appointment Completed - Prescription Details', content);
-        }
+                const patientEmail = appointment.patient_id.user_id?.email;
+                if (patientEmail) {
+                        const medsHtml = (prescriptionRecord?.medications || [])
+                                .map(
+                                        (med) => `
+                            <li>
+                                <strong>${med.name}</strong> - ${med.dosage}, ${med.frequency} for ${med.duration}
+                                ${med.instructions ? `<br/><em>${med.instructions}</em>` : ''}
+                            </li>
+                        `
+                                )
+                                .join('');
+
+                        const content = `
+                <p>Your appointment has been completed. Here are the details:</p>
+                <div class="success">
+                    <strong>Doctor:</strong> Dr. ${appointment.doctor_id.user_id?.full_name}<br/>
+                    <strong>Date:</strong> ${appointment.appointment_date.toDateString()}
+                </div>
+                <h3>Prescription</h3>
+                ${medsHtml ? `<ul>${medsHtml}</ul>` : '<p>No prescription provided</p>'}
+                <h3>Instructions</h3>
+                <p>${prescriptionRecord?.notes || instructions || 'No special instructions'}</p>
+                <p>You can now chat with the doctor for any follow-up questions.</p>
+            `;
+                        await sendEmail(patientEmail, 'Appointment Completed - Prescription Details', content);
+                }
     } catch (emailErr) {
         console.error('Failed to send completion email:', emailErr);
     }
@@ -1865,16 +1920,16 @@ export const markNoShow = async (appointmentId, doctorId) => {
         throw err;
     }
 
-    if (appointment.status !== 'CONFIRMED') {
-        const err = new Error('Only confirmed appointments can be marked as no-show');
+    if (appointment.status !== 'CONFIRMED' && appointment.status !== 'PAST') {
+        const err = new Error('Only confirmed or past appointments can be marked as no-show');
         err.statusCode = 400;
         throw err;
     }
 
-    // Check if appointment date is in the past
     const now = new Date();
-    if (appointment.appointment_date >= now) {
-        const err = new Error('Cannot mark future appointments as no-show');
+    const appointmentEnd = getAppointmentEndDateTime(appointment);
+    if (appointmentEnd > now) {
+        const err = new Error('Cannot mark appointment as no-show before it ends');
         err.statusCode = 400;
         throw err;
     }
@@ -1912,6 +1967,7 @@ export const markNoShow = async (appointmentId, doctorId) => {
  * Get patient's appointments with pagination
  */
 export const getPatientAppointments = async (patientId, status = null, page = 0, size = 10) => {
+    await markPastConfirmedAppointments();
     const query = { patient_id: patientId };
     if (status) {
         if (typeof status === 'string' && status.includes(',')) {
@@ -1923,10 +1979,23 @@ export const getPatientAppointments = async (patientId, status = null, page = 0,
         }
     }
 
+    if (status === 'CONFIRMED') {
+        const { startOfToday, endOfToday } = getTodayDateRange();
+        const currentTime = getCurrentTimeString();
+        query.$or = [
+            { appointment_date: { $gt: endOfToday } },
+            {
+                appointment_date: { $gte: startOfToday, $lte: endOfToday },
+                slot_end_time: { $gt: currentTime },
+            },
+        ];
+    }
+
     const skip = page * size;
     const totalElements = await Appointment.countDocuments(query);
     const appointments = await Appointment.find(query)
         .populate({ path: 'doctor_id', populate: { path: 'user_id', select: 'full_name email' } })
+        .populate('prescription_id')
         .sort({ appointment_date: -1, slot_start_time: -1 })
         .skip(skip)
         .limit(size)
@@ -1951,8 +2020,8 @@ export const getPatientAppointments = async (patientId, status = null, page = 0,
             paymentAmount: apt.payment_amount,
             refundAmount: apt.refund_amount,
             challanNumber: apt.challan_number,
-            prescription: apt.prescription,
-            instructions: apt.instructions,
+            prescription: apt.prescription_id,
+            instructions: apt.prescription_id?.notes,
             completedAt: apt.completed_at,
             cancelledBy: apt.cancelled_by,
             cancellationReason: apt.cancellation_reason,
@@ -1974,6 +2043,7 @@ export const getPatientAppointments = async (patientId, status = null, page = 0,
  * Get doctor's appointments with pagination
  */
 export const getDoctorAppointments = async (doctorId, status = null, date = null, page = 0, size = 10) => {
+    await markPastConfirmedAppointments();
     const query = { doctor_id: doctorId };
     if (status) {
         if (typeof status === 'string' && status.includes(',')) {
@@ -1992,10 +2062,23 @@ export const getDoctorAppointments = async (doctorId, status = null, date = null
         query.appointment_date = { $gte: startOfDay, $lte: endOfDay };
     }
 
+    if (status === 'CONFIRMED' && !date) {
+        const { startOfToday, endOfToday } = getTodayDateRange();
+        const currentTime = getCurrentTimeString();
+        query.$or = [
+            { appointment_date: { $gt: endOfToday } },
+            {
+                appointment_date: { $gte: startOfToday, $lte: endOfToday },
+                slot_end_time: { $gt: currentTime },
+            },
+        ];
+    }
+
     const skip = page * size;
     const totalElements = await Appointment.countDocuments(query);
     const appointments = await Appointment.find(query)
         .populate({ path: 'patient_id', populate: { path: 'user_id', select: 'full_name email' } })
+        .populate('prescription_id')
         .sort({ appointment_date: 1, slot_start_time: 1 })
         .skip(skip)
         .limit(size)
@@ -2015,8 +2098,8 @@ export const getDoctorAppointments = async (doctorId, status = null, date = null
             reason: apt.reason,
             meetingLink: apt.meeting_link,
             paymentStatus: apt.payment_status,
-            prescription: apt.prescription,
-            instructions: apt.instructions,
+            prescription: apt.prescription_id,
+            instructions: apt.prescription_id?.notes,
             cancelledBy: apt.cancelled_by,
             cancellationReason: apt.cancellation_reason,
             rescheduleReason: apt.reschedule_reason,
@@ -2034,13 +2117,11 @@ export const getDoctorAppointments = async (doctorId, status = null, date = null
  * Get past appointments for doctor (appointments that have already occurred)
  */
 export const getPastDoctorAppointments = async (doctorId, page = 0, size = 10) => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0); // Set to start of today
-    
-    const query = { 
+    await markPastConfirmedAppointments();
+
+    const query = {
         doctor_id: doctorId,
-        appointment_date: { $lt: today }, // Only appointments before today
-        status: { $nin: ['COMPLETED', 'NO_SHOW', 'CANCELLED'] } // Exclude already finalized appointments
+        status: 'PAST',
     };
 
     const skip = page * size;
@@ -2068,7 +2149,7 @@ export const getPastDoctorAppointments = async (doctorId, page = 0, size = 10) =
             meetingLink: apt.meeting_link,
             paymentStatus: apt.payment_status,
             prescription: apt.prescription_id,
-            instructions: apt.instructions,
+            instructions: apt.prescription_id?.notes,
             completedAt: apt.completed_at,
             patientAttended: apt.patient_attended,
             cancelledBy: apt.cancelled_by,
@@ -2088,12 +2169,11 @@ export const getPastDoctorAppointments = async (doctorId, page = 0, size = 10) =
  * Get past appointments for patient
  */
 export const getPastPatientAppointments = async (patientId, page = 0, size = 10) => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0); // Set to start of today
-    
-    const query = { 
+    await markPastConfirmedAppointments();
+
+    const query = {
         patient_id: patientId,
-        appointment_date: { $lt: today } // Only appointments before today - patients see all past appointments
+        status: 'PAST',
     };
 
     const skip = page * size;
@@ -2121,7 +2201,7 @@ export const getPastPatientAppointments = async (patientId, page = 0, size = 10)
             meetingLink: apt.meeting_link,
             paymentStatus: apt.payment_status,
             prescription: apt.prescription_id,
-            instructions: apt.instructions,
+            instructions: apt.prescription_id?.notes,
             completedAt: apt.completed_at,
             patientAttended: apt.patient_attended,
             cancelledBy: apt.cancelled_by,
@@ -2191,6 +2271,7 @@ export const getAppointmentById = async (appointmentId) => {
     const appointment = await Appointment.findById(appointmentId)
         .populate({ path: 'patient_id', populate: { path: 'user_id', select: 'full_name email' } })
         .populate({ path: 'doctor_id', populate: { path: 'user_id', select: 'full_name email' } })
+        .populate('prescription_id')
         .lean();
 
     if (!appointment) {
@@ -2218,8 +2299,8 @@ export const getAppointmentById = async (appointmentId) => {
         paymentAmount: appointment.payment_amount,
         refundAmount: appointment.refund_amount,
         challanNumber: appointment.challan_number,
-        prescription: appointment.prescription,
-        instructions: appointment.instructions,
+        prescription: appointment.prescription_id,
+        instructions: appointment.prescription_id?.notes,
         completedAt: appointment.completed_at,
         cancelledBy: appointment.cancelled_by,
         cancellationReason: appointment.cancellation_reason,

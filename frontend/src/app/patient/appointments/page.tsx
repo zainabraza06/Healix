@@ -24,7 +24,7 @@ interface Appointment {
   slotStartTime: string;
   slotEndTime: string;
   appointmentType: 'ONLINE' | 'OFFLINE';
-  status: 'REQUESTED' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW' | 'RESCHEDULE_REQUESTED';
+  status: 'REQUESTED' | 'CONFIRMED' | 'PAST' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW' | 'RESCHEDULE_REQUESTED';
   reason: string;
   meetingLink?: string;
   paymentStatus?: 'PENDING' | 'PAID' | 'REFUNDED';
@@ -33,7 +33,16 @@ interface Appointment {
   doctorCancellationReason?: string;
   rescheduleRequestedBy?: 'PATIENT' | 'DOCTOR';
   rescheduleReason?: string;
-  prescription?: string;
+  prescription?: {
+    medications?: Array<{
+      name: string;
+      dosage: string;
+      frequency: string;
+      duration: string;
+      instructions?: string;
+    }>;
+    notes?: string;
+  } | null;
   instructions?: string;
 }
 
@@ -451,6 +460,8 @@ export default function AppointmentsPage() {
           statusFilter = 'REQUESTED';
         } else if (activeTab === 'cancelled') {
           statusFilter = 'CANCELLED';
+        } else if (activeTab === 'completed') {
+          statusFilter = 'COMPLETED,NO_SHOW';
         } else if (activeTab === 'rescheduling') {
           statusFilter = 'RESCHEDULE_REQUESTED';
         }
@@ -597,6 +608,16 @@ export default function AppointmentsPage() {
     }
   };
 
+  const isAppointmentPast = (apt: Appointment) => {
+    const appointmentDate = new Date(apt.appointmentDate);
+    const endTime = apt.slotEndTime || apt.slotStartTime;
+    if (!endTime) return false;
+    const [hours, minutes] = endTime.split(':').map(Number);
+    const appointmentEnd = new Date(appointmentDate);
+    appointmentEnd.setHours(hours || 0, minutes || 0, 0, 0);
+    return appointmentEnd.getTime() <= new Date().getTime();
+  };
+
   const resetBookingForm = () => {
     setSelectedDoctor('');
     setSelectedDate('');
@@ -690,12 +711,13 @@ export default function AppointmentsPage() {
     } else if (activeTab === 'requested') {
       filtered = appointments.filter((apt) => apt.status === 'REQUESTED');
     } else if (activeTab === 'confirmed') {
-      filtered = appointments.filter((apt) => apt.status === 'CONFIRMED');
+      filtered = appointments.filter((apt) => apt.status === 'CONFIRMED' && !isAppointmentPast(apt));
     } else if (activeTab === 'cancelled') {
       filtered = appointments.filter((apt) => apt.status === 'CANCELLED');
+    } else if (activeTab === 'completed') {
+      filtered = appointments.filter((apt) => apt.status === 'COMPLETED' || apt.status === 'NO_SHOW');
     } else if (activeTab === 'past') {
-      // Past appointments are already filtered by the API
-      filtered = appointments;
+      filtered = appointments.filter((apt) => apt.status === 'PAST');
     }
     
     return filtered;
@@ -925,6 +947,16 @@ export default function AppointmentsPage() {
                 Cancelled
               </button>
               <button
+                onClick={() => setActiveTab('completed')}
+                className={`px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                  activeTab === 'completed'
+                    ? 'bg-teal-600 text-white shadow-xl shadow-teal-600/20'
+                    : 'bg-white/40 text-slate-600 border border-white/60 hover:bg-white/60'
+                }`}
+              >
+                Completed
+              </button>
+              <button
                 onClick={() => setActiveTab('doctorRequests')}
                 className={`px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${
                   activeTab === 'doctorRequests'
@@ -983,6 +1015,7 @@ export default function AppointmentsPage() {
                       activeTab === 'requested' ? 'bg-amber-500' :
                       activeTab === 'rescheduling' ? 'bg-cyan-500' :
                       activeTab === 'doctorRequests' ? 'bg-blue-500' :
+                      activeTab === 'completed' ? 'bg-teal-500' :
                       activeTab === 'past' ? 'bg-purple-500' :
                       'bg-red-500'
                     }`} />
@@ -993,6 +1026,7 @@ export default function AppointmentsPage() {
                         activeTab === 'requested' ? 'bg-amber-100 text-amber-700' :
                         activeTab === 'rescheduling' ? 'bg-cyan-100 text-cyan-700' :
                         activeTab === 'doctorRequests' ? 'bg-blue-100 text-blue-700' :
+                        activeTab === 'completed' ? 'bg-teal-100 text-teal-700' :
                         activeTab === 'past' ? 'bg-purple-100 text-purple-700' :
                         'bg-red-100 text-red-700'
                       }`}>
@@ -1027,10 +1061,8 @@ export default function AppointmentsPage() {
                                                     {/* Status for Past Tab */}
                                                     {activeTab === 'past' && (
                                                       <div className="flex items-center gap-2 col-span-full">
-                                                        <span className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest ${
-                                                          apt.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
-                                                        }`}>
-                                                          {apt.status === 'COMPLETED' ? 'Completed' : 'No Show'}
+                                                        <span className="px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest bg-purple-100 text-purple-700">
+                                                          Past (Needs Action)
                                                         </span>
                                                       </div>
                                                     )}
@@ -1121,10 +1153,10 @@ export default function AppointmentsPage() {
                         )}
 
                         {/* Action Buttons */}
-                        {(activeTab === 'requested' || activeTab === 'confirmed' || activeTab === 'rescheduling' || activeTab === 'doctorRequests' || activeTab === 'past') && (
+                        {(activeTab === 'requested' || activeTab === 'confirmed' || activeTab === 'rescheduling' || activeTab === 'doctorRequests' || activeTab === 'past' || activeTab === 'completed') && (
                           <div className="mt-6 flex flex-wrap items-center gap-4">
                             {/* Past Appointments - Show prescription and instructions */}
-                            {activeTab === 'past' && apt.status === 'COMPLETED' && 
+                            {(activeTab === 'past' || activeTab === 'completed') && apt.status === 'COMPLETED' && 
                               typeof apt.prescription === 'object' &&
                               Array.isArray((apt.prescription as any).medications) &&
                               (apt.prescription as any).medications.length > 0 && (
@@ -1166,7 +1198,7 @@ export default function AppointmentsPage() {
                             )}
 
                             {/* Cancel Button - Only show for non-past appointments */}
-                            {activeTab !== 'past' && canCancelAppointment(apt) ? (
+                            {activeTab !== 'past' && activeTab !== 'completed' && canCancelAppointment(apt) ? (
                               <button
                                 onClick={() => {
                                   setAppointmentToCancel(apt);
@@ -1177,7 +1209,7 @@ export default function AppointmentsPage() {
                               >
                                 Cancel Appointment
                               </button>
-                            ) : activeTab !== 'past' && !canCancelAppointment(apt) ? (
+                            ) : activeTab !== 'past' && activeTab !== 'completed' && !canCancelAppointment(apt) ? (
                               <button
                                 disabled
                                 title={getCancellationDisabledReason(apt)}
