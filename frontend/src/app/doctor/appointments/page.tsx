@@ -37,6 +37,8 @@ export default function DoctorAppointmentsPage() {
   const [showCompleteModal, setShowCompleteModal] = useState(false);
   const [medications, setMedications] = useState<any[]>([{ name: '', dosage: '', frequency: '', duration: '', instructions: '' }]);
   const [instructions, setInstructions] = useState('');
+  const [expandedCompletedId, setExpandedCompletedId] = useState<string | null>(null);
+  const [rescheduleSubTab, setRescheduleSubTab] = useState<'patient' | 'doctor'>('patient');
 
   // Pagination state
   const [requestsPage, setRequestsPage] = useState(0);
@@ -53,13 +55,14 @@ export default function DoctorAppointmentsPage() {
   const [pastTotalPages, setPastTotalPages] = useState(0);
   const pageSize = 10;
 
-  // Helper function to check if appointment is past or today
-  const isAppointmentPastOrToday = (appointmentDate: string) => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+  const isAppointmentPast = (appointmentDate: string, slotEndTime?: string, slotStartTime?: string) => {
     const aptDate = new Date(appointmentDate);
-    aptDate.setHours(0, 0, 0, 0);
-    return aptDate <= today;
+    const endTime = slotEndTime || slotStartTime;
+    if (!endTime) return false;
+    const [hours, minutes] = endTime.split(':').map(Number);
+    const appointmentEnd = new Date(aptDate);
+    appointmentEnd.setHours(hours || 0, minutes || 0, 0, 0);
+    return appointmentEnd.getTime() <= new Date().getTime();
   };
 
   useEffect(() => {
@@ -74,7 +77,7 @@ export default function DoctorAppointmentsPage() {
         apiClient.getDoctorAppointments('CONFIRMED', undefined, appointmentsPage, pageSize),
         apiClient.getDoctorAppointments('RESCHEDULE_REQUESTED', undefined, reschedulingPage, pageSize),
         apiClient.getPastDoctorAppointments(pastPage, pageSize),
-        apiClient.getDoctorAppointments('COMPLETED', undefined, completedPage, pageSize),
+        apiClient.getDoctorAppointments('COMPLETED,NO_SHOW', undefined, completedPage, pageSize),
         apiClient.getDoctorAppointments('CANCELLED', undefined, cancelledPage, pageSize),
       ]);
 
@@ -240,13 +243,6 @@ export default function DoctorAppointmentsPage() {
   const handleCompleteAppointment = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validate medications
-    const validMedications = medications.filter(med => med.name.trim() && med.dosage.trim() && med.frequency.trim() && med.duration.trim());
-    if (validMedications.length === 0) {
-      toast.error('Please add at least one medication with name, dosage, frequency, and duration');
-      return;
-    }
-
     if (!instructions.trim()) {
       toast.error('Please provide instructions');
       return;
@@ -254,6 +250,7 @@ export default function DoctorAppointmentsPage() {
 
     try {
       setIsSubmitting(true);
+      const validMedications = medications.filter(med => med.name.trim() && med.dosage.trim() && med.frequency.trim() && med.duration.trim());
       const response = await apiClient.completeAppointment(selectedAppointment.id, validMedications, instructions.trim());
       if (response.success) {
         toast.success('Appointment completed successfully!');
@@ -679,7 +676,6 @@ export default function DoctorAppointmentsPage() {
                                   setMedications(newMeds);
                                 }}
                                 className="px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm font-medium"
-                                required
                               />
                               <input
                                 type="text"
@@ -691,7 +687,6 @@ export default function DoctorAppointmentsPage() {
                                   setMedications(newMeds);
                                 }}
                                 className="px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm font-medium"
-                                required
                               />
                               <input
                                 type="text"
@@ -703,7 +698,6 @@ export default function DoctorAppointmentsPage() {
                                   setMedications(newMeds);
                                 }}
                                 className="px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm font-medium"
-                                required
                               />
                               <input
                                 type="text"
@@ -715,7 +709,6 @@ export default function DoctorAppointmentsPage() {
                                   setMedications(newMeds);
                                 }}
                                 className="px-3 py-2 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm font-medium"
-                                required
                               />
                             </div>
                             <textarea
@@ -754,7 +747,13 @@ export default function DoctorAppointmentsPage() {
                         required
                       />
                     </div>
-                    <div className="flex gap-3 pt-4">
+                    <div className="flex flex-col gap-2 pt-4">
+                      {!instructions.trim() && (
+                        <p className="text-[10px] font-black uppercase tracking-widest text-red-600">
+                          Follow-up instructions are required to complete the appointment.
+                        </p>
+                      )}
+                      <div className="flex gap-3">
                       <button
                         type="button"
                         onClick={() => setShowCompleteModal(false)}
@@ -764,11 +763,12 @@ export default function DoctorAppointmentsPage() {
                       </button>
                       <button
                         type="submit"
-                        disabled={isSubmitting || medications.filter(med => med.name.trim() && med.dosage.trim() && med.frequency.trim() && med.duration.trim()).length === 0 || !instructions.trim()}
-                        className="flex-1 px-6 py-3 bg-purple-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-purple-700 shadow-xl shadow-purple-600/20 transition-all active:scale-[0.98]"
+                        disabled={isSubmitting || !instructions.trim()}
+                        className="flex-1 px-6 py-3 bg-purple-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-purple-700 shadow-xl shadow-purple-600/20 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {isSubmitting ? 'Completing...' : 'Complete'}
                       </button>
+                      </div>
                     </div>
                   </form>
                 </motion.div>
@@ -934,7 +934,7 @@ export default function DoctorAppointmentsPage() {
                               </div>
                             </div>
                             <div className="flex gap-3 w-full md:w-auto">
-                              {isAppointmentPastOrToday(apt.appointmentDate) ? (
+                              {isAppointmentPast(apt.appointmentDate, apt.slotEndTime, apt.slotStartTime) ? (
                                 <div className="flex gap-2 w-full">
                                   <button
                                     onClick={() => {
@@ -1008,6 +1008,29 @@ export default function DoctorAppointmentsPage() {
                 </>
               ) : activeTab === 'rescheduling' ? (
                 <>
+                  <div className="flex items-center gap-2 mb-6 p-2 bg-white/20 backdrop-blur-md rounded-2xl border border-white/40 w-fit">
+                    <button
+                      onClick={() => setRescheduleSubTab('patient')}
+                      className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                        rescheduleSubTab === 'patient'
+                          ? 'bg-cyan-600 text-white shadow-xl shadow-cyan-600/20'
+                          : 'bg-transparent text-slate-600 hover:bg-white/40'
+                      }`}
+                    >
+                      Patient Requested
+                    </button>
+                    <button
+                      onClick={() => setRescheduleSubTab('doctor')}
+                      className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                        rescheduleSubTab === 'doctor'
+                          ? 'bg-slate-900 text-white shadow-xl shadow-slate-900/20'
+                          : 'bg-transparent text-slate-600 hover:bg-white/40'
+                      }`}
+                    >
+                      Doctor Initiated
+                    </button>
+                  </div>
+
                   {reschedulingRequests.length === 0 ? (
                     <EmptyState
                       icon={Edit3}
@@ -1015,7 +1038,10 @@ export default function DoctorAppointmentsPage() {
                     />
                   ) : (
                     <div className="grid grid-cols-1 gap-6">
-                      {reschedulingRequests.map((req, i) => (
+                      {(rescheduleSubTab === 'patient'
+                        ? reschedulingRequests.filter((req) => req.rescheduleRequestedBy === 'PATIENT')
+                        : reschedulingRequests.filter((req) => req.rescheduleRequestedBy === 'DOCTOR')
+                      ).map((req, i) => (
                         <motion.div
                           key={req.id}
                           initial={{ opacity: 0, x: -20 }}
@@ -1050,8 +1076,8 @@ export default function DoctorAppointmentsPage() {
                               </div>
                             </div>
                             <div className="flex gap-3 w-full md:w-auto">
-                              {/* If patient has proposed a new time (rescheduleRequestedBy === 'PATIENT'), only allow Approve or Reschedule (no Reject/Cancel) */}
-                              {((req.rescheduleStatus === 'PENDING' || !req.rescheduleStatus) && req.rescheduleRequestedBy === 'PATIENT') ? (
+                              {rescheduleSubTab === 'patient' ? (
+                                (req.rescheduleStatus === 'PENDING' || !req.rescheduleStatus) ? (
                                 <>
                                   <button
                                     onClick={async () => {
@@ -1085,33 +1111,46 @@ export default function DoctorAppointmentsPage() {
                                     Reschedule
                                   </button>
                                 </>
-                              ) : (req.rescheduleStatus === 'PENDING' || !req.rescheduleStatus) ? (
+                                ) : req.rescheduleStatus === 'APPROVED' ? (
+                                  <span className="px-6 py-3.5 bg-emerald-100 text-emerald-700 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center">Reschedule Approved</span>
+                                ) : req.rescheduleStatus === 'REJECTED' ? (
+                                  <span className="px-6 py-3.5 bg-red-100 text-red-700 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center">Reschedule Rejected</span>
+                                ) : null
+                              ) : (
                                 <>
                                   <button
-                                    onClick={() => {
-                                      setSelectedAppointment(req);
-                                      setDeclineReason('');
-                                      setShowDeclineModal(true);
+                                    onClick={async () => {
+                                      setIsSubmitting(true);
+                                      try {
+                                        const response = await apiClient.confirmAppointment(req.id);
+                                        if (response.success) {
+                                          toast.success('Reschedule accepted. Appointment confirmed.');
+                                          fetchData();
+                                        } else {
+                                          toast.error(response.message || 'Failed to accept reschedule');
+                                        }
+                                      } catch (err) {
+                                        toast.error('An error occurred');
+                                      } finally {
+                                        setIsSubmitting(false);
+                                      }
                                     }}
-                                    className="flex-1 md:flex-none px-8 py-3.5 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-700 shadow-xl shadow-red-600/20 transition-all active:scale-[0.98]"
+                                    disabled={isSubmitting}
+                                    className="flex-1 md:flex-none px-8 py-3.5 bg-emerald-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 shadow-xl shadow-emerald-600/20 transition-all active:scale-[0.98]"
                                   >
-                                    Reject
+                                    {isSubmitting ? 'Accepting...' : 'Accept'}
                                   </button>
                                   <button
                                     onClick={() => {
                                       setSelectedAppointment(req);
                                       setShowRescheduleForm(true);
                                     }}
-                                    className="flex-1 md:flex-none px-8 py-3.5 bg-cyan-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-cyan-700 shadow-xl shadow-cyan-600/20 transition-all active:scale-[0.98]"
+                                    className="flex-1 md:flex-none px-8 py-3.5 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-black shadow-xl shadow-slate-900/20 transition-all active:scale-[0.98]"
                                   >
-                                    Approve
+                                    Request Another Date
                                   </button>
                                 </>
-                              ) : req.rescheduleStatus === 'APPROVED' ? (
-                                <span className="px-6 py-3.5 bg-emerald-100 text-emerald-700 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center">Reschedule Approved</span>
-                              ) : req.rescheduleStatus === 'REJECTED' ? (
-                                <span className="px-6 py-3.5 bg-red-100 text-red-700 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center">Reschedule Rejected</span>
-                              ) : null}
+                              )}
                             </div>
                           </div>
                         </motion.div>
@@ -1152,12 +1191,20 @@ export default function DoctorAppointmentsPage() {
                                   </span>
                                   <span className="flex items-center gap-2 text-xs font-bold text-slate-500 uppercase tracking-widest bg-white/50 px-3 py-1.5 rounded-xl">
                                     <Clock size={14} className="text-purple-600" />
-                                    {apt.appointmentTime || 'N/A'}
+                                    {apt.slotStartTime || 'N/A'}
                                   </span>
                                   <span className={`flex items-center gap-2 text-xs font-bold uppercase tracking-widest px-3 py-1.5 rounded-xl ${
-                                    apt.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
+                                    apt.status === 'COMPLETED'
+                                      ? 'bg-emerald-100 text-emerald-700'
+                                      : apt.status === 'NO_SHOW'
+                                      ? 'bg-red-100 text-red-700'
+                                      : 'bg-amber-100 text-amber-700'
                                   }`}>
-                                    {apt.status === 'COMPLETED' ? 'Completed' : 'No Show'}
+                                    {apt.status === 'COMPLETED'
+                                      ? 'Completed'
+                                      : apt.status === 'NO_SHOW'
+                                      ? 'No Show'
+                                      : 'Needs Action'}
                                   </span>
                                 </div>
                                 {apt.reason && (
@@ -1166,25 +1213,27 @@ export default function DoctorAppointmentsPage() {
                               </div>
                             </div>
                             <div className="flex flex-col gap-3 w-full md:w-auto">
-                              <div className="flex gap-2">
-                                <button
-                                  onClick={() => {
-                                    setSelectedAppointment(apt);
-                                    setMedications([{ name: '', dosage: '', frequency: '', duration: '', instructions: '' }]);
-                                    setInstructions('');
-                                    setShowCompleteModal(true);
-                                  }}
-                                  className="flex-1 md:flex-none px-6 py-3.5 bg-purple-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-purple-700 shadow-xl shadow-purple-600/20 transition-all active:scale-[0.98]"
-                                >
-                                  Complete
-                                </button>
-                                <button
-                                  onClick={() => handleMarkNoShow(apt.id)}
-                                  className="flex-1 md:flex-none px-6 py-3.5 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-700 shadow-xl shadow-red-600/20 transition-all active:scale-[0.98]"
-                                >
-                                  No Show
-                                </button>
-                              </div>
+                              {(apt.status === 'CONFIRMED' || apt.status === 'PAST') && (
+                                <div className="flex gap-2">
+                                  <button
+                                    onClick={() => {
+                                      setSelectedAppointment(apt);
+                                      setMedications([{ name: '', dosage: '', frequency: '', duration: '', instructions: '' }]);
+                                      setInstructions('');
+                                      setShowCompleteModal(true);
+                                    }}
+                                    className="flex-1 md:flex-none px-6 py-3.5 bg-purple-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-purple-700 shadow-xl shadow-purple-600/20 transition-all active:scale-[0.98]"
+                                  >
+                                    Complete
+                                  </button>
+                                  <button
+                                    onClick={() => handleMarkNoShow(apt.id)}
+                                    className="flex-1 md:flex-none px-6 py-3.5 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-700 shadow-xl shadow-red-600/20 transition-all active:scale-[0.98]"
+                                  >
+                                    No Show
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           </div>
                         </motion.div>
@@ -1249,32 +1298,78 @@ export default function DoctorAppointmentsPage() {
                                     <Clock size={14} className="text-teal-600" />
                                     {apt.slotStartTime}
                                   </span>
+                                  <span className={`flex items-center gap-2 text-xs font-bold uppercase tracking-widest px-3 py-1.5 rounded-xl ${
+                                    apt.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
+                                  }`}>
+                                    {apt.status === 'COMPLETED' ? 'Completed' : 'No Show'}
+                                  </span>
                                 </div>
-                                {apt.prescription?.medications && apt.prescription?.medications.length > 0 && (
-                                  <div className="mt-4 text-sm text-slate-600 bg-white/50 p-3 rounded-xl">
-                                    <p className="font-bold mb-2">Prescription:</p>
-                                    <div className="space-y-2">
-                                      {apt.prescription.medications.map((med: any, idx: number) => (
-                                        <div key={idx} className="bg-white/70 p-2 rounded-lg">
-                                          <p className="font-semibold">{med.name} - {med.dosage}</p>
-                                          <p className="text-xs">Frequency: {med.frequency} | Duration: {med.duration}</p>
-                                          {med.instructions && <p className="text-xs italic">Instructions: {med.instructions}</p>}
-                                        </div>
-                                      ))}
-                                    </div>
-                                    {apt.prescription.notes && (
-                                      <>
-                                        <p className="font-bold mt-3 mb-1">Follow-up Instructions:</p>
-                                        <p>{apt.prescription.notes}</p>
-                                      </>
-                                    )}
-                                  </div>
-                                )}
                               </div>
                             </div>
+                            <div className="flex gap-2 w-full md:w-auto">
+                              <button
+                                onClick={() => setExpandedCompletedId(prev => (prev === apt.id ? null : apt.id))}
+                                className="px-5 py-3 bg-white/60 border border-slate-200 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-700 hover:bg-white transition-all"
+                              >
+                                {expandedCompletedId === apt.id ? 'Hide Details' : 'View Details'}
+                              </button>
+                            </div>
                           </div>
+                          {expandedCompletedId === apt.id && (
+                            <div className="mt-6 text-sm text-slate-600 bg-white/50 p-4 rounded-xl border border-slate-200">
+                              {apt.status === 'NO_SHOW' ? (
+                                <p className="text-red-600 font-bold uppercase tracking-widest text-xs">Patient marked as No Show.</p>
+                              ) : (
+                                <>
+                                  {apt.prescription?.medications && apt.prescription?.medications.length > 0 ? (
+                                    <>
+                                      <p className="font-bold mb-2">Prescription:</p>
+                                      <div className="space-y-2">
+                                        {apt.prescription.medications.map((med: any, idx: number) => (
+                                          <div key={idx} className="bg-white/70 p-2 rounded-lg">
+                                            <p className="font-semibold">{med.name} - {med.dosage}</p>
+                                            <p className="text-xs">Frequency: {med.frequency} | Duration: {med.duration}</p>
+                                            {med.instructions && <p className="text-xs italic">Instructions: {med.instructions}</p>}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <p className="text-xs font-bold uppercase tracking-widest text-slate-500">No prescription provided.</p>
+                                  )}
+                                  {apt.prescription?.notes && (
+                                    <>
+                                      <p className="font-bold mt-3 mb-1">Follow-up Instructions:</p>
+                                      <p>{apt.prescription.notes}</p>
+                                    </>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          )}
                         </motion.div>
                       ))}
+                    </div>
+                  )}
+                  {!isLoading && completedAppointments.length > 0 && completedTotalPages > 1 && (
+                    <div className="flex justify-center items-center gap-6 mt-12">
+                      <button
+                        onClick={() => setCompletedPage(prev => Math.max(0, prev - 1))}
+                        disabled={completedPage === 0}
+                        className="px-6 py-3 bg-white/40 backdrop-blur-md rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-600 disabled:opacity-30 transition-all hover:bg-white/60"
+                      >
+                        Prev
+                      </button>
+                      <span className="text-slate-400 font-black text-[10px] uppercase tracking-[0.3em]">
+                        Page {completedPage + 1} / {completedTotalPages}
+                      </span>
+                      <button
+                        onClick={() => setCompletedPage(prev => Math.min(completedTotalPages - 1, prev + 1))}
+                        disabled={completedPage >= completedTotalPages - 1}
+                        className="px-6 py-3 bg-white/40 backdrop-blur-md rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-600 disabled:opacity-30 transition-all hover:bg-white/60"
+                      >
+                        Next
+                      </button>
                     </div>
                   )}
                 </>

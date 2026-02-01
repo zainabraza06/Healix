@@ -37,7 +37,16 @@ interface Appointment {
     appointment_type: 'ONLINE' | 'OFFLINE';
     status: 'REQUESTED' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW';
     payment_status?: 'PENDING' | 'PAID' | 'REFUNDED' | 'PARTIAL_REFUND';
-    prescription?: string;
+    prescription?: {
+        medications?: Array<{
+            name: string;
+            dosage: string;
+            frequency: string;
+            duration: string;
+            instructions?: string;
+        }>;
+        notes?: string;
+    } | null;
     instructions?: string;
     reason?: string;
     notes?: string;
@@ -53,7 +62,7 @@ interface Appointment {
     created_at?: string;
 }
 
-type TabType = 'CONFIRMED' | 'REQUESTED' | 'CANCELLED' | 'COMPLETED';
+type TabType = 'CONFIRMED' | 'REQUESTED' | 'CANCELLED' | 'COMPLETED' | 'PAST';
 
 export default function AdminAppointmentsPage() {
     const router = useRouter();
@@ -191,7 +200,7 @@ export default function AdminAppointmentsPage() {
 
                     {/* Tabs */}
                     <div className="mb-6 flex flex-wrap gap-2">
-                        {(['CONFIRMED', 'REQUESTED', 'COMPLETED', 'CANCELLED'] as const).map((tab) => (
+                        {(['CONFIRMED', 'REQUESTED', 'PAST', 'COMPLETED', 'CANCELLED'] as const).map((tab) => (
                             <button
                                 key={tab}
                                 onClick={() => {
@@ -485,16 +494,27 @@ export default function AdminAppointmentsPage() {
                                             <div className="border-t border-slate-200 pt-4">
                                                 <h3 className="font-bold text-lg text-slate-800 mb-3">Prescription</h3>
                                                 <div className="bg-blue-50 p-4 rounded-lg">
-                                                    <p className="text-slate-700 whitespace-pre-wrap">
-                                                        {selectedAppointment.prescription || 'No prescription provided'}
-                                                    </p>
+                                                    {selectedAppointment.prescription?.medications && selectedAppointment.prescription.medications.length > 0 ? (
+                                                        <ul className="space-y-2">
+                                                            {selectedAppointment.prescription.medications.map((med, idx) => (
+                                                                <li key={idx} className="text-slate-700">
+                                                                    <span className="font-semibold">{med.name}</span> - {med.dosage}, {med.frequency} for {med.duration}
+                                                                    {med.instructions && (
+                                                                        <p className="text-xs text-slate-500 italic">Instructions: {med.instructions}</p>
+                                                                    )}
+                                                                </li>
+                                                            ))}
+                                                        </ul>
+                                                    ) : (
+                                                        <p className="text-slate-700 whitespace-pre-wrap">No prescription provided</p>
+                                                    )}
                                                 </div>
                                             </div>
                                             <div className="border-t border-slate-200 pt-4">
                                                 <h3 className="font-bold text-lg text-slate-800 mb-3">Instructions</h3>
                                                 <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100">
                                                     <p className="text-slate-700 whitespace-pre-wrap">
-                                                        {selectedAppointment.instructions || 'No instructions provided'}
+                                                        {selectedAppointment.prescription?.notes || selectedAppointment.instructions || 'No instructions provided'}
                                                     </p>
                                                 </div>
                                             </div>

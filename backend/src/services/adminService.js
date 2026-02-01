@@ -2,7 +2,26 @@
 export const getAllAppointmentsForDownload = async (status, payment_status) => {
   try {
     const query = {};
-    if (status) query.status = status;
+    if (status) {
+      if (status === 'PAST') {
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+        const endOfToday = new Date();
+        endOfToday.setHours(23, 59, 59, 999);
+        const currentTime = new Date().toTimeString().slice(0, 5);
+
+        query.status = { $nin: ['COMPLETED', 'NO_SHOW', 'CANCELLED'] };
+        query.$or = [
+          { appointment_date: { $lt: startOfToday } },
+          {
+            appointment_date: { $gte: startOfToday, $lte: endOfToday },
+            slot_end_time: { $lte: currentTime },
+          },
+        ];
+      } else {
+        query.status = status;
+      }
+    }
     if (payment_status) query.payment_status = payment_status;
     const appointments = await Appointment.find(query)
       .populate({
@@ -13,6 +32,7 @@ export const getAllAppointmentsForDownload = async (status, payment_status) => {
         path: 'doctor_id',
         populate: { path: 'user_id', select: 'full_name name email' },
       })
+      .populate('prescription_id')
       .sort({ appointment_date: -1, slot_start_time: -1 })
       .lean();
     return appointments.map(a => ({
@@ -24,8 +44,8 @@ export const getAllAppointmentsForDownload = async (status, payment_status) => {
       doctor_name: a.doctor_id?.user_id?.full_name || a.doctor_id?.user_id?.name || 'N/A',
       status: a.status,
       payment_status: a.payment_status,
-      prescription: a.prescription || '',
-      instructions: a.instructions || '',
+      prescription: a.prescription_id?.medications ? JSON.stringify(a.prescription_id.medications) : '',
+      instructions: a.prescription_id?.notes || '',
     }));
   } catch (error) {
     throw new Error(`Failed to fetch appointments for download: ${error.message}`);
@@ -671,7 +691,26 @@ export const getPaginatedDoctors = async (page = 0, size = 10, search = '', requ
 export const getPaginatedAppointments = async (page = 0, size = 10, status, payment_status) => {
   try {
     const query = {};
-    if (status) query.status = status;
+    if (status) {
+      if (status === 'PAST') {
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+        const endOfToday = new Date();
+        endOfToday.setHours(23, 59, 59, 999);
+        const currentTime = new Date().toTimeString().slice(0, 5);
+
+        query.status = { $nin: ['COMPLETED', 'NO_SHOW', 'CANCELLED'] };
+        query.$or = [
+          { appointment_date: { $lt: startOfToday } },
+          {
+            appointment_date: { $gte: startOfToday, $lte: endOfToday },
+            slot_end_time: { $lte: currentTime },
+          },
+        ];
+      } else {
+        query.status = status;
+      }
+    }
     if (payment_status) query.payment_status = payment_status;
 
     const appointments = await Appointment.find(query)
@@ -683,7 +722,8 @@ export const getPaginatedAppointments = async (page = 0, size = 10, status, paym
         path: 'doctor_id',
         populate: { path: 'user_id', select: 'full_name name email' },
       })
-      .sort({ appointment_date: -1, appointment_time: -1 })
+      .populate('prescription_id')
+      .sort({ appointment_date: -1, slot_start_time: -1 })
       .skip(page * size)
       .limit(size)
       .lean();
@@ -691,8 +731,14 @@ export const getPaginatedAppointments = async (page = 0, size = 10, status, paym
     const totalElements = await Appointment.countDocuments(query);
     const totalPages = Math.ceil(totalElements / size);
 
+    const normalizedAppointments = appointments.map((apt) => ({
+      ...apt,
+      prescription: apt.prescription_id || null,
+      instructions: apt.prescription_id?.notes || '',
+    }));
+
     return {
-      content: appointments,
+      content: normalizedAppointments,
       pageNumber: page,
       pageSize: size,
       totalElements,
