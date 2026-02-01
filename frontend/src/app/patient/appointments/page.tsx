@@ -104,6 +104,12 @@ export default function AppointmentsPage() {
   const [docCancelReason, setDocCancelReason] = useState('');
   const [isProcessingDocCancel, setIsProcessingDocCancel] = useState(false);
 
+  // Rejection Response Modal State
+  const [showRejectionResponseModal, setShowRejectionResponseModal] = useState(false);
+  const [appointmentForRejectionResponse, setAppointmentForRejectionResponse] = useState<Appointment | null>(null);
+  const [rejectionResponseAction, setRejectionResponseAction] = useState<'keep_original' | 'cancel' | null>(null);
+  const [isProcessingRejectionResponse, setIsProcessingRejectionResponse] = useState(false);
+
   // Calculate booking window dates (3 days to 30 days from now)
   const { minBookingDate, maxBookingDate } = useMemo(() => {
     const today = new Date();
@@ -252,6 +258,40 @@ export default function AppointmentsPage() {
       console.error(err);
     } finally {
       setIsCancelling(false);
+    }
+  };
+
+  // Handle response to reschedule rejection
+  const handleRejectionResponse = async () => {
+    if (!appointmentForRejectionResponse || !rejectionResponseAction) {
+      return;
+    }
+
+    try {
+      setIsProcessingRejectionResponse(true);
+      const response = await apiClient.respondToRescheduleRejection(
+        appointmentForRejectionResponse.id,
+        rejectionResponseAction
+      );
+
+      if (response.success) {
+        if (rejectionResponseAction === 'keep_original') {
+          toast.success('Original appointment slot restored successfully');
+        } else {
+          toast.success('Appointment cancelled. Rs. 750 refunded (Rs. 250 deducted as processing fee)');
+        }
+        setShowRejectionResponseModal(false);
+        setAppointmentForRejectionResponse(null);
+        setRejectionResponseAction(null);
+        fetchAppointments();
+      } else {
+        toast.error(response.message || 'Failed to process response');
+      }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Error processing response');
+      console.error(err);
+    } finally {
+      setIsProcessingRejectionResponse(false);
     }
   };
 
@@ -1202,6 +1242,46 @@ export default function AppointmentsPage() {
                                   Respond to Reschedule Request
                                 </button>
                               )
+                            ) : activeTab === 'rescheduling' && apt.rescheduleRequestedBy === 'PATIENT' && apt.rescheduleRejected ? (
+                              /* Patient-initiated reschedule was rejected by doctor - show response options */
+                              <div className="flex flex-col gap-4 w-full">
+                                <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                                  <p className="text-sm font-semibold text-red-800 mb-2">Doctor Rejected Your Reschedule Request</p>
+                                  <p className="text-xs text-slate-600">Please choose how to proceed:</p>
+                                </div>
+                                <div className="flex flex-wrap gap-3">
+                                  <button
+                                    onClick={() => {
+                                      setAppointmentForRejectionResponse(apt);
+                                      setRejectionResponseAction('keep_original');
+                                      setShowRejectionResponseModal(true);
+                                    }}
+                                    className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-emerald-600/20"
+                                  >
+                                    Keep Original Slot
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setAppointmentForRejectionResponse(apt);
+                                      setRejectionResponseAction('cancel');
+                                      setShowRejectionResponseModal(true);
+                                    }}
+                                    className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-red-600/20"
+                                  >
+                                    Cancel (₹250 Deduction)
+                                  </button>
+                                </div>
+                              </div>
+                            ) : activeTab === 'rescheduling' && apt.rescheduleRequestedBy === 'PATIENT' && !apt.rescheduleRejected ? (
+                              /* Patient-initiated reschedule waiting for doctor response */
+                              <div className="flex flex-col items-start gap-2">
+                                <span className="px-6 py-3 bg-blue-100 text-blue-700 rounded-xl text-[10px] font-black uppercase tracking-widest">
+                                  Waiting for Doctor Response
+                                </span>
+                                <span className="text-[9px] text-slate-500 font-medium">
+                                  Doctor will approve or reject your reschedule request
+                                </span>
+                              </div>
                             ) : (activeTab === 'confirmed' || (activeTab === 'rescheduling' && apt.rescheduleRequestedBy === 'DOCTOR')) && (
                               <button
                                 onClick={() => openRescheduleModal(apt)}
@@ -1535,6 +1615,119 @@ export default function AppointmentsPage() {
               >
                 Close
               </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Rejection Response Modal */}
+      <AnimatePresence>
+        {showRejectionResponseModal && appointmentForRejectionResponse && rejectionResponseAction && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="glass-card p-10 max-w-md w-full border-white/60 shadow-2xl"
+            >
+              <div className="flex justify-between items-start mb-6">
+                <div>
+                  <h3 className="text-2xl font-black text-slate-800 tracking-tight uppercase">
+                    {rejectionResponseAction === 'keep_original' ? 'Keep Original Slot' : 'Cancel Appointment'}
+                  </h3>
+                  <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mt-1">
+                    With Dr. {appointmentForRejectionResponse.doctorName}
+                  </p>
+                </div>
+                <button 
+                  onClick={() => { 
+                    setShowRejectionResponseModal(false); 
+                    setAppointmentForRejectionResponse(null); 
+                    setRejectionResponseAction(null); 
+                  }} 
+                  className="p-2 hover:bg-slate-100 rounded-xl transition-colors"
+                >
+                  <X size={20} className="text-slate-400" />
+                </button>
+              </div>
+
+              {rejectionResponseAction === 'keep_original' ? (
+                <div className="mb-6 p-4 bg-emerald-50 rounded-2xl border border-emerald-100">
+                  <p className="text-sm font-bold text-emerald-700 mb-2">Restore Original Appointment</p>
+                  <p className="text-xs text-slate-600">
+                    Your appointment will be restored to its original confirmed slot:
+                  </p>
+                  <div className="mt-3 p-3 bg-white rounded-xl">
+                    <p className="text-sm font-semibold text-slate-800">
+                      {new Date(appointmentForRejectionResponse.appointmentDate).toLocaleDateString('en-US', { 
+                        weekday: 'long', 
+                        year: 'numeric', 
+                        month: 'long', 
+                        day: 'numeric' 
+                      })}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Time: {appointmentForRejectionResponse.slotStartTime} - {appointmentForRejectionResponse.slotEndTime}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="mb-6 p-4 bg-red-50 rounded-2xl border border-red-100">
+                  <p className="text-sm font-bold text-red-700 mb-2">Cancel & Refund</p>
+                  <p className="text-xs text-slate-600 mb-3">
+                    Since you initiated the reschedule request, a ₹250 processing fee will be deducted.
+                  </p>
+                  <div className="bg-white rounded-xl p-3 space-y-1">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-600">Original Payment:</span>
+                      <span className="font-semibold">₹1,000</span>
+                    </div>
+                    <div className="flex justify-between text-sm text-red-600">
+                      <span>Processing Fee:</span>
+                      <span className="font-semibold">-₹250</span>
+                    </div>
+                    <hr className="my-2" />
+                    <div className="flex justify-between text-sm font-bold text-emerald-700">
+                      <span>Refund Amount:</span>
+                      <span>₹750</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                <button
+                  onClick={handleRejectionResponse}
+                  disabled={isProcessingRejectionResponse}
+                  className={`flex-1 px-6 py-4 ${
+                    rejectionResponseAction === 'keep_original' 
+                      ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20' 
+                      : 'bg-red-600 hover:bg-red-700 shadow-red-600/20'
+                  } disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg active:scale-[0.98]`}
+                >
+                  {isProcessingRejectionResponse 
+                    ? 'Processing...' 
+                    : rejectionResponseAction === 'keep_original' 
+                      ? 'Confirm Keep Original' 
+                      : 'Confirm Cancellation'
+                  }
+                </button>
+                <button
+                  onClick={() => { 
+                    setShowRejectionResponseModal(false); 
+                    setAppointmentForRejectionResponse(null); 
+                    setRejectionResponseAction(null); 
+                  }}
+                  className="flex-1 px-6 py-4 bg-white/40 text-slate-600 border border-white/60 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-white/60 transition-all"
+                >
+                  Go Back
+                </button>
+              </div>
             </motion.div>
           </motion.div>
         )}
