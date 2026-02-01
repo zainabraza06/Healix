@@ -252,11 +252,15 @@ export default function DoctorDashboard() {
   }
 
   // Process data for charts
+  const caseMix = dashboardData?.caseMix;
   const appointmentDistribution = dashboardData ? [
-    { name: 'Upcoming', value: dashboardData.upcomingAppointments?.length || 0, color: '#10b981' },
-    { name: 'Pending', value: dashboardData.pendingRequests?.length || 0, color: '#f59e0b' },
-    { name: 'Alerts', value: dashboardData.stats?.emergencyAlertsCount || 0, color: '#ef4444' },
-  ] : [];
+    { name: 'Online', value: caseMix?.onlineCount || 0, color: '#3b82f6' },
+    { name: 'Offline', value: caseMix?.offlineCount || 0, color: '#8b5cf6' },
+    { name: 'Completed', value: caseMix?.completedCount || 0, color: '#10b981' },
+    { name: 'Past', value: caseMix?.pastCount || 0, color: '#f59e0b' },
+    { name: 'Cancelled', value: caseMix?.cancelledCount || 0, color: '#6b7280' },
+    { name: 'Alerts', value: caseMix?.alertsCount || 0, color: '#ef4444' },
+  ].filter(item => item.value > 0) : [];
 
   const weeklyActivity = dashboardData?.weeklyActivity || [];
 

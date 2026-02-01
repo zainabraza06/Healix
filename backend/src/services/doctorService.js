@@ -297,12 +297,12 @@ export const getDoctorDashboard = async (doctorId) => {
         });
     });
 
-    // 5. Weekly Activity (last 7 days)
+    // 5. Weekly Activity (this week - today + next 6 days)
     const weeklyActivity = [];
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    for (let i = 6; i >= 0; i--) {
+    for (let i = 0; i <= 6; i++) {
       const dayStart = new Date();
-      dayStart.setDate(dayStart.getDate() - i);
+      dayStart.setDate(dayStart.getDate() + i);
       dayStart.setHours(0, 0, 0, 0);
       const dayEnd = new Date(dayStart);
       dayEnd.setHours(23, 59, 59, 999);
@@ -312,7 +312,7 @@ export const getDoctorDashboard = async (doctorId) => {
         return await Appointment.countDocuments({
           doctor_id: doctorId,
           appointment_date: { $gte: dayStart, $lte: dayEnd },
-          status: { $in: ['CONFIRMED', 'COMPLETED'] }
+          status: { $in: ['CONFIRMED', 'COMPLETED', 'PAST', 'REQUESTED'] }
         });
       });
 
@@ -321,6 +321,43 @@ export const getDoctorDashboard = async (doctorId) => {
         appointments: count
       });
     }
+
+    // 6. Case Mix - appointment types distribution (all active appointments)
+    const caseMix = await (async () => {
+      const AppointmentMod = await import('../models/Appointment.js');
+      const AlertMod = await import('../models/Alert.js');
+      const Appointment = AppointmentMod.default;
+      const Alert = AlertMod.default;
+      const [onlineCount, offlineCount, completedCount, cancelledCount, pastCount, alertsCount] = await Promise.all([
+        Appointment.countDocuments({
+          doctor_id: doctorId,
+          appointment_type: 'ONLINE',
+          status: { $in: ['CONFIRMED', 'REQUESTED', 'RESCHEDULE_REQUESTED'] }
+        }),
+        Appointment.countDocuments({
+          doctor_id: doctorId,
+          appointment_type: 'OFFLINE',
+          status: { $in: ['CONFIRMED', 'REQUESTED', 'RESCHEDULE_REQUESTED'] }
+        }),
+        Appointment.countDocuments({
+          doctor_id: doctorId,
+          status: 'COMPLETED'
+        }),
+        Appointment.countDocuments({
+          doctor_id: doctorId,
+          status: 'CANCELLED'
+        }),
+        Appointment.countDocuments({
+          doctor_id: doctorId,
+          status: 'PAST'
+        }),
+        Alert.countDocuments({
+          doctor_id: doctorId,
+          status: 'ACTIVE'
+        })
+      ]);
+      return { onlineCount, offlineCount, completedCount, cancelledCount, pastCount, alertsCount };
+    })();
 
     return {
       doctor,
@@ -366,7 +403,8 @@ export const getDoctorDashboard = async (doctorId) => {
         status: alert.status,
         timestamp: alert.created_at
       })),
-      weeklyActivity
+      weeklyActivity,
+      caseMix
     };
   } catch (error) {
     throw new Error(`Failed to fetch doctor dashboard: ${error.message}`);

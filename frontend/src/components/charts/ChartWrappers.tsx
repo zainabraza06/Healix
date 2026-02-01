@@ -13,6 +13,7 @@ import {
     Cell,
     BarChart,
     Bar,
+    Legend,
 } from 'recharts';
 
 interface ChartData {
@@ -74,16 +75,23 @@ export function PieChartWrapper({ data }: PieChartWrapperProps) {
                     data={data}
                     cx="50%"
                     cy="50%"
-                    innerRadius="45%"
-                    outerRadius="85%"
+                    innerRadius="40%"
+                    outerRadius="70%"
                     paddingAngle={5}
                     dataKey="value"
+                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    labelLine={false}
                 >
                     {data.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                 </Pie>
                 <Tooltip />
+                <Legend 
+                    verticalAlign="bottom" 
+                    height={36}
+                    formatter={(value, entry: any) => <span style={{ color: entry.color }}>{value}</span>}
+                />
             </PieChart>
         </ResponsiveContainer>
     );
