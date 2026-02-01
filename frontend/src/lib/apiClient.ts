@@ -207,12 +207,12 @@ class ApiClient {
   }
 
   // Chat (Patient)
-  async checkPatientChatEligibility(doctorId: string): Promise<ApiResponse<{ allowed: boolean; reason: string }>> {
+  async checkPatientChatEligibility(doctorId: string): Promise<ApiResponse<{ allowed: boolean; reason: string; hasMessages?: boolean; readOnly?: boolean }>> {
     const response = await this.client.get(`/chat/patient/${doctorId}/can-chat`);
     return response.data;
   }
 
-  async getPatientChatHistory(doctorId: string): Promise<ApiResponse<any[]>> {
+  async getPatientChatHistory(doctorId: string): Promise<ApiResponse<any[]> & { chatStatus?: { canSendMessages: boolean; reason: string } }> {
     const response = await this.client.get(`/chat/patient/${doctorId}/history`);
     return response.data;
   }
@@ -585,7 +585,12 @@ class ApiClient {
   }
 
   // Chat (Doctor)
-  async getDoctorChatHistory(patientId: string): Promise<ApiResponse<any[]>> {
+  async checkDoctorChatEligibility(patientId: string): Promise<ApiResponse<{ allowed: boolean; reason: string; hasMessages?: boolean; readOnly?: boolean }>> {
+    const response = await this.client.get(`/chat/doctor/${patientId}/can-chat`);
+    return response.data;
+  }
+
+  async getDoctorChatHistory(patientId: string): Promise<ApiResponse<any[]> & { chatStatus?: { canSendMessages: boolean; reason: string } }> {
     const response = await this.client.get(`/chat/doctor/${patientId}/history`);
     return response.data;
   }

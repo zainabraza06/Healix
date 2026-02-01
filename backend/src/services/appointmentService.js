@@ -1871,13 +1871,16 @@ export const completeAppointment = async (appointmentId, doctorId, medications, 
     throw err;
   }
 
-  const now = new Date();
-  const appointmentEnd = getAppointmentEndDateTime(appointment);
+  // Only check time for CONFIRMED appointments - PAST appointments have already been verified
+  if (appointment.status === 'CONFIRMED') {
+    const now = new Date();
+    const appointmentEnd = getAppointmentEndDateTime(appointment);
 
-  if (appointmentEnd > now) {
-    const err = new Error('Cannot complete appointment before it ends');
-    err.statusCode = 400;
-    throw err;
+    if (appointmentEnd > now) {
+      const err = new Error('Cannot complete appointment before it ends');
+      err.statusCode = 400;
+      throw err;
+    }
   }
 
   if (!instructions || !instructions.trim()) {

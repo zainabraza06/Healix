@@ -11,20 +11,26 @@ const router = express.Router();
 
 router.use(authenticate);
 
-// Get chat history for patient with doctor (guarded)
+// Get chat history for patient with doctor (always allowed for viewing past messages)
 router.get('/patient/:doctorId/history', authorize('PATIENT'), async (req, res, next) => {
   try {
     const patient = await getPatientByUser(req.user._id);
     const doctorId = req.params.doctorId;
 
+    // Check chat eligibility but don't block - just inform
     const chatStatus = await isChatAllowed(patient._id, doctorId);
-    if (!chatStatus.allowed) {
-      return res.status(403).json({ success: false, message: chatStatus.reason || 'Chat not allowed.' });
-    }
 
     const messages = await Message.find({ doctor_id: doctorId, patient_id: patient._id })
       .sort({ created_at: 1 }).lean();
-    res.json({ success: true, data: messages });
+    
+    res.json({ 
+      success: true, 
+      data: messages,
+      chatStatus: {
+        canSendMessages: chatStatus.allowed,
+        reason: chatStatus.reason
+      }
+    });
   } catch (error) {
     next(error);
   }
@@ -79,20 +85,26 @@ router.post('/patient/:doctorId/message', authorize('PATIENT'), async (req, res,
   }
 });
 
-// Get chat history for doctor with patient (guarded)
+// Get chat history for doctor with patient (always allowed for viewing past messages)
 router.get('/doctor/:patientId/history', authorize('DOCTOR'), async (req, res, next) => {
   try {
     const doctor = await getDoctorByUser(req.user._id);
     const patientId = req.params.patientId;
 
+    // Check chat eligibility but don't block - just inform
     const chatStatus = await isChatAllowed(patientId, doctor._id);
-    if (!chatStatus.allowed) {
-      return res.status(403).json({ success: false, message: chatStatus.reason || 'Chat not allowed.' });
-    }
 
     const messages = await Message.find({ doctor_id: doctor._id, patient_id: patientId })
       .sort({ created_at: 1 }).lean();
-    res.json({ success: true, data: messages });
+    
+    res.json({ 
+      success: true, 
+      data: messages,
+      chatStatus: {
+        canSendMessages: chatStatus.allowed,
+        reason: chatStatus.reason
+      }
+    });
   } catch (error) {
     next(error);
   }
@@ -208,11 +220,42 @@ router.get('/patient/:doctorId/can-chat', authorize('PATIENT'), async (req, res,
     const doctorId = req.params.doctorId;
 
     const chatStatus = await isChatAllowed(patient._id, doctorId);
+    
+    // Also check if there are any past messages (for read-only mode)
+    const hasMessages = await Message.exists({ doctor_id: doctorId, patient_id: patient._id });
+    
     res.json({ 
       success: true, 
       data: { 
         allowed: chatStatus.allowed, 
-        reason: chatStatus.reason 
+        reason: chatStatus.reason,
+        hasMessages: !!hasMessages,
+        readOnly: !chatStatus.allowed && !!hasMessages
+      } 
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Check if chat is allowed for doctor with a specific patient
+router.get('/doctor/:patientId/can-chat', authorize('DOCTOR'), async (req, res, next) => {
+  try {
+    const doctor = await getDoctorByUser(req.user._id);
+    const patientId = req.params.patientId;
+
+    const chatStatus = await isChatAllowed(patientId, doctor._id);
+    
+    // Also check if there are any past messages (for read-only mode)
+    const hasMessages = await Message.exists({ doctor_id: doctor._id, patient_id: patientId });
+    
+    res.json({ 
+      success: true, 
+      data: { 
+        allowed: chatStatus.allowed, 
+        reason: chatStatus.reason,
+        hasMessages: !!hasMessages,
+        readOnly: !chatStatus.allowed && !!hasMessages
       } 
     });
   } catch (error) {

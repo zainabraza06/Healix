@@ -40,7 +40,7 @@ export default function ChatModal({ isOpen, onClose }: ChatModalProps) {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [isOnline, setIsOnline] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
-  const [chatNotAllowed, setChatNotAllowed] = useState<{ allowed: boolean; reason: string } | null>(null);
+  const [chatNotAllowed, setChatNotAllowed] = useState<{ allowed: boolean; reason: string; hasMessages?: boolean; readOnly?: boolean } | null>(null);
   const [checkingEligibility, setCheckingEligibility] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const socketRef = useRef<any>(null);
@@ -265,49 +265,39 @@ export default function ChatModal({ isOpen, onClose }: ChatModalProps) {
     }
   };
 
-  // Handle contact selection with eligibility check for patients
+  // Handle contact selection with eligibility check for both patients and doctors
   const handleSelectContact = async (contact: any) => {
     setChatNotAllowed(null);
-    
-    // For patients, check chat eligibility first
-    if (isPatient) {
-      try {
-        setCheckingEligibility(true);
-        const response = await apiClient.checkPatientChatEligibility(contact.id);
-        
-        if (response.success && response.data) {
-          if (!response.data.allowed) {
-            setChatNotAllowed(response.data);
-            setSelectedContact(contact);
-            return;
-          }
-        }
-      } catch (error: any) {
-        // If eligibility check fails with 403, extract the reason
-        if (error?.response?.status === 403) {
-          setChatNotAllowed({
-            allowed: false,
-            reason: error?.response?.data?.message || 'Chat not allowed with this doctor.'
-          });
-          setSelectedContact(contact);
-          return;
-        }
-        console.error("Failed to check chat eligibility", error);
-      } finally {
-        setCheckingEligibility(false);
-      }
-    }
-    
-    // Chat is allowed, proceed
     setSelectedContact(contact);
+    
+    // Check chat eligibility for both patients and doctors
+    try {
+      setCheckingEligibility(true);
+      const response = isDoctor
+        ? await apiClient.checkDoctorChatEligibility(contact.id)
+        : await apiClient.checkPatientChatEligibility(contact.id);
+      
+      if (response.success && response.data) {
+        setChatNotAllowed(response.data);
+      }
+    } catch (error: any) {
+      // If eligibility check fails with 403, extract the reason
+      if (error?.response?.status === 403) {
+        setChatNotAllowed({
+          allowed: false,
+          reason: error?.response?.data?.message || 'Chat eligibility could not be verified.',
+          hasMessages: false,
+          readOnly: false
+        });
+      }
+      console.error("Failed to check chat eligibility", error);
+    } finally {
+      setCheckingEligibility(false);
+    }
   };
 
   const fetchMessages = async (contactId: string) => {
-    // Skip fetching if chat is not allowed
-    if (chatNotAllowed && !chatNotAllowed.allowed) {
-      return;
-    }
-    
+    // Always fetch messages - they can view past conversations even if chat is not allowed
     try {
       setLoadingMessages(true);
       const response = isDoctor
@@ -317,6 +307,16 @@ export default function ChatModal({ isOpen, onClose }: ChatModalProps) {
       if (response.success) {
         const msgs = response.data || [];
         setMessages(msgs);
+        
+        // Update chat status from response if available
+        if (response.chatStatus) {
+          setChatNotAllowed({
+            allowed: response.chatStatus.canSendMessages,
+            reason: response.chatStatus.reason,
+            hasMessages: msgs.length > 0,
+            readOnly: !response.chatStatus.canSendMessages && msgs.length > 0
+          });
+        }
 
         const myRole = isDoctor ? "DOCTOR" : "PATIENT";
         const undeliveredIds = msgs
@@ -538,8 +538,8 @@ export default function ChatModal({ isOpen, onClose }: ChatModalProps) {
                   </button>
                 </div>
 
-                {/* Chat Not Allowed Message */}
-                {chatNotAllowed && !chatNotAllowed.allowed ? (
+                {/* Chat Not Allowed Message - only show if no messages */}
+                {chatNotAllowed && !chatNotAllowed.allowed && messages.length === 0 ? (
                   <div className="flex-1 flex items-center justify-center p-6">
                     <div className="text-center max-w-sm">
                       <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -552,7 +552,7 @@ export default function ChatModal({ isOpen, onClose }: ChatModalProps) {
                         <ul className="text-xs text-slate-600 space-y-1.5">
                           <li className="flex items-start gap-2">
                             <span className="text-emerald-500 mt-0.5">•</span>
-                            <span>Active health alert with this doctor</span>
+                            <span>Active health alert with this {isDoctor ? 'patient' : 'doctor'}</span>
                           </li>
                           <li className="flex items-start gap-2">
                             <span className="text-emerald-500 mt-0.5">•</span>
@@ -568,6 +568,16 @@ export default function ChatModal({ isOpen, onClose }: ChatModalProps) {
                   </div>
                 ) : (
                   <>
+                    {/* Read-only mode banner */}
+                    {chatNotAllowed && !chatNotAllowed.allowed && messages.length > 0 && (
+                      <div className="px-4 py-2 bg-amber-50 border-b border-amber-200">
+                        <p className="text-xs text-amber-700 font-medium flex items-center gap-2">
+                          <span className="w-2 h-2 bg-amber-500 rounded-full"></span>
+                          Read-only mode: {chatNotAllowed.reason}
+                        </p>
+                      </div>
+                    )}
+                    
                     {/* Messages */}
                     <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50">
                       {loadingMessages ? (
@@ -631,23 +641,29 @@ export default function ChatModal({ isOpen, onClose }: ChatModalProps) {
 
                 {/* Input */}
                 <div className="p-3 border-t border-slate-200 bg-white">
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={input}
-                      onChange={handleInputChange}
-                      onKeyPress={handleKeyPress}
-                      placeholder="Type a message..."
-                      className="flex-1 px-4 py-2 border border-slate-200 rounded-full focus:outline-none focus:border-emerald-500 text-sm"
-                    />
-                    <button
-                      onClick={sendMessage}
-                      disabled={!input.trim()}
-                      className="bg-emerald-600 text-white p-2 rounded-full hover:bg-emerald-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <Send className="w-4 h-4" />
-                    </button>
-                  </div>
+                  {chatNotAllowed && !chatNotAllowed.allowed ? (
+                    <div className="text-center py-2">
+                      <p className="text-xs text-slate-500">Messaging is disabled - viewing past conversation only</p>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={input}
+                        onChange={handleInputChange}
+                        onKeyPress={handleKeyPress}
+                        placeholder="Type a message..."
+                        className="flex-1 px-4 py-2 border border-slate-200 rounded-full focus:outline-none focus:border-emerald-500 text-sm"
+                      />
+                      <button
+                        onClick={sendMessage}
+                        disabled={!input.trim()}
+                        className="bg-emerald-600 text-white p-2 rounded-full hover:bg-emerald-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <Send className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
                 </div>
                   </>
                 )}
