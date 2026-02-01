@@ -711,7 +711,7 @@ export default function AppointmentsPage() {
     } else if (activeTab === 'requested') {
       filtered = appointments.filter((apt) => apt.status === 'REQUESTED');
     } else if (activeTab === 'confirmed') {
-      filtered = appointments.filter((apt) => apt.status === 'CONFIRMED' && !isAppointmentPast(apt));
+      filtered = appointments.filter((apt) => apt.status === 'CONFIRMED');
     } else if (activeTab === 'cancelled') {
       filtered = appointments.filter((apt) => apt.status === 'CANCELLED');
     } else if (activeTab === 'completed') {
