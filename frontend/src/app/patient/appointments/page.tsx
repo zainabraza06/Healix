@@ -33,6 +33,9 @@ interface Appointment {
   doctorCancellationReason?: string;
   rescheduleRequestedBy?: 'PATIENT' | 'DOCTOR';
   rescheduleReason?: string;
+  rescheduleRejected?: boolean;
+  rescheduleRejectionReason?: string;
+  patientRespondedToDoctorReschedule?: boolean;
   prescription?: {
     medications?: Array<{
       name: string;
@@ -471,22 +474,6 @@ export default function AppointmentsPage() {
       if (response.success && response.data) {
         setAppointments(response.data.content || []);
         setTotalPages(response.data.totalPages || 0);
-
-        // Check if any appointment has doctor cancelled reschedule request
-        const apptWithDocCancel = response.data.content?.find((apt: any) => apt.doctorCancelledRescheduleRequest);
-        if (apptWithDocCancel) {
-          setAppointmentWithDocCancel(apptWithDocCancel);
-          setShowDocCancelledModal(true);
-        } else {
-          // Check if any appointment is a doctor-requested reschedule
-          const apptWithDocReschedule = response.data.content?.find((apt: any) => 
-            apt.status === 'RESCHEDULE_REQUESTED' && apt.rescheduleRequestedBy === 'DOCTOR'
-          );
-          if (apptWithDocReschedule) {
-            setAppointmentWithDocCancel(apptWithDocReschedule);
-            setShowDocCancelledModal(true);
-          }
-        }
       }
     } catch (err) {
       toast.error('Failed to load appointments');
@@ -1049,13 +1036,29 @@ export default function AppointmentsPage() {
                                                     {/* Status for Rescheduling Tab */}
                                                     {activeTab === 'rescheduling' && (
                                                       <div className="flex items-center gap-2 col-span-full">
-                                                        <span className="px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest bg-blue-100 text-blue-700">
-                                                          {apt.status === 'RESCHEDULE_REQUESTED' && apt.rescheduleRequestedBy === 'PATIENT'
-                                                            ? 'In Progress (Waiting for Doctor Response)'
-                                                            : apt.status === 'RESCHEDULE_REQUESTED' && apt.rescheduleRequestedBy === 'DOCTOR'
-                                                              ? 'Doctor Requested Reschedule'
-                                                              : 'Rescheduling'}
+                                                        <span className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest ${
+                                                          apt.rescheduleRejected 
+                                                            ? 'bg-red-100 text-red-700'
+                                                            : 'bg-blue-100 text-blue-700'
+                                                        }`}>
+                                                          {apt.rescheduleRejected
+                                                            ? 'Doctor Rejected - Action Required'
+                                                            : apt.status === 'RESCHEDULE_REQUESTED' && apt.rescheduleRequestedBy === 'PATIENT'
+                                                              ? 'In Progress (Waiting for Doctor Response)'
+                                                              : apt.status === 'RESCHEDULE_REQUESTED' && apt.rescheduleRequestedBy === 'DOCTOR'
+                                                                ? 'Doctor Requested Reschedule'
+                                                                : 'Rescheduling'}
                                                         </span>
+                                                      </div>
+                                                    )}
+                                                    {/* Reschedule Rejection Reason */}
+                                                    {activeTab === 'rescheduling' && apt.rescheduleRejected && apt.rescheduleRejectionReason && (
+                                                      <div className="col-span-full flex items-start gap-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-red-50 px-3 py-2 rounded-xl">
+                                                        <AlertCircle size={14} className="text-red-500 mt-0.5 flex-shrink-0" />
+                                                        <div>
+                                                          <p className="text-red-600 font-black">Doctor's Reason:</p>
+                                                          <p className="text-slate-700 normal-case font-medium mt-1">{apt.rescheduleRejectionReason}</p>
+                                                        </div>
                                                       </div>
                                                     )}
                                                     {/* Status for Past Tab */}
@@ -1182,12 +1185,23 @@ export default function AppointmentsPage() {
 
                             {/* Reschedule Button - For Doctor Requests tab, this shows the doctor's request */}
                             {activeTab === 'doctorRequests' ? (
-                              <button
-                                onClick={() => openRescheduleModal(apt)}
-                                className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-600/20"
-                              >
-                                Respond to Reschedule Request
-                              </button>
+                              apt.patientRespondedToDoctorReschedule ? (
+                                <div className="flex flex-col items-start gap-2">
+                                  <span className="px-6 py-3 bg-amber-100 text-amber-700 rounded-xl text-[10px] font-black uppercase tracking-widest">
+                                    Reschedule Sent - Waiting for Doctor Response
+                                  </span>
+                                  <span className="text-[9px] text-slate-500 font-medium">
+                                    Doctor will accept or propose another date
+                                  </span>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => openRescheduleModal(apt)}
+                                  className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-blue-600/20"
+                                >
+                                  Respond to Reschedule Request
+                                </button>
+                              )
                             ) : (activeTab === 'confirmed' || (activeTab === 'rescheduling' && apt.rescheduleRequestedBy === 'DOCTOR')) && (
                               <button
                                 onClick={() => openRescheduleModal(apt)}

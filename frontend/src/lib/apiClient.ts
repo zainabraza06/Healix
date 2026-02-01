@@ -372,6 +372,16 @@ class ApiClient {
     return response.data;
   }
 
+  async rejectReschedule(appointmentId: string, reason: string): Promise<ApiResponse<any>> {
+    const response = await this.client.post(`/doctor/appointments/${appointmentId}/reject-reschedule`, { reason });
+    return response.data;
+  }
+
+  async respondToRescheduleRejection(appointmentId: string, action: 'keep_original' | 'cancel', reason?: string): Promise<ApiResponse<any>> {
+    const response = await this.client.post(`/patient/appointments/${appointmentId}/reschedule-rejection-response`, { action, reason });
+    return response.data;
+  }
+
   async requestDoctorEmergencyReschedule(appointmentId: string, reason: string): Promise<ApiResponse<any>> {
     const response = await this.client.post(`/doctor/appointments/${appointmentId}/request-emergency-reschedule`, { reason });
     return response.data;

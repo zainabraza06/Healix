@@ -314,6 +314,8 @@ export const confirmAppointment = async (appointmentId, doctorId, meetingLink = 
     // Clear reschedule rejection flags if any
     appointment.reschedule_rejected = false;
     appointment.reschedule_rejection_reason = undefined;
+    appointment.patient_responded_to_doctor_reschedule = false;
+    appointment.reschedule_requested_by = undefined;
     await appointment.save();
 
     // Notify patient of confirmation
@@ -1495,6 +1497,8 @@ export const requestRescheduleByDoctor = async (appointmentId, doctorId, reason)
   appointment.status = 'RESCHEDULE_REQUESTED';
   appointment.reschedule_reason = reason;
   appointment.reschedule_requested_by = 'DOCTOR';
+  // Reset patient response flag since doctor is requesting a new reschedule
+  appointment.patient_responded_to_doctor_reschedule = false;
   await appointment.save();
 
   // Send notification/email
@@ -1615,9 +1619,15 @@ export const rescheduleAppointmentByPatient = async (appointmentId, patientId, n
   // Status Logic for Patient Rescheduling:
   // PAID confirmed appointments become RESCHEDULE_REQUESTED for doctor approval.
   // UNPAID confirmed appointments are treated as new REQUESTED.
+  // If already RESCHEDULE_REQUESTED by doctor, keep it as doctor-initiated (patient is responding)
   if (appointment.status === 'CONFIRMED' && appointment.payment_status !== 'PAID') {
     appointment.status = 'REQUESTED';
     appointment.reschedule_requested_by = undefined;
+  } else if (appointment.status === 'RESCHEDULE_REQUESTED' && appointment.reschedule_requested_by === 'DOCTOR') {
+    // Patient is responding to doctor's reschedule request - keep it as doctor initiated
+    // Status remains RESCHEDULE_REQUESTED with reschedule_requested_by = 'DOCTOR'
+    // Set flag to indicate patient has proposed a new date/time
+    appointment.patient_responded_to_doctor_reschedule = true;
   } else {
     appointment.status = 'RESCHEDULE_REQUESTED';
     appointment.reschedule_requested_by = 'PATIENT';
@@ -2064,6 +2074,9 @@ export const getPatientAppointments = async (patientId, status = null, page = 0,
       cancellationReason: apt.cancellation_reason,
       rescheduleReason: apt.reschedule_reason,
       rescheduleRequestedBy: apt.reschedule_requested_by,
+      rescheduleRejected: apt.reschedule_rejected,
+      rescheduleRejectionReason: apt.reschedule_rejection_reason,
+      patientRespondedToDoctorReschedule: apt.patient_responded_to_doctor_reschedule,
       doctorCancelledRescheduleRequest: apt.doctor_cancelled_reschedule_request,
       doctorCancellationReason: apt.doctor_cancellation_reason,
       chatEnabled: apt.chat_enabled,
@@ -2134,6 +2147,9 @@ export const getDoctorAppointments = async (doctorId, status = null, date = null
       cancellationReason: apt.cancellation_reason,
       rescheduleReason: apt.reschedule_reason,
       rescheduleRequestedBy: apt.reschedule_requested_by,
+      rescheduleRejected: apt.reschedule_rejected,
+      rescheduleRejectionReason: apt.reschedule_rejection_reason,
+      patientRespondedToDoctorReschedule: apt.patient_responded_to_doctor_reschedule,
       createdAt: apt.created_at,
     })),
     pageNumber: page,

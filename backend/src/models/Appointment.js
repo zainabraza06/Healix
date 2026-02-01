@@ -118,6 +118,11 @@ const appointmentSchema = new mongoose.Schema(
     reschedule_rejection_reason: {
       type: String,
     },
+    // Track if patient has responded to doctor's reschedule request with a proposed date
+    patient_responded_to_doctor_reschedule: {
+      type: Boolean,
+      default: false,
+    },
     // Doctor cancelled reschedule request - patient needs to choose
     doctor_cancelled_reschedule_request: {
       type: Boolean,

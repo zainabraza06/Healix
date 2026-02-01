@@ -35,6 +35,8 @@ export default function DoctorAppointmentsPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [rescheduleReason, setRescheduleReason] = useState('');
   const [showCompleteModal, setShowCompleteModal] = useState(false);
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
   const [medications, setMedications] = useState<any[]>([{ name: '', dosage: '', frequency: '', duration: '', instructions: '' }]);
   const [instructions, setInstructions] = useState('');
   const [expandedCompletedId, setExpandedCompletedId] = useState<string | null>(null);
@@ -547,6 +549,98 @@ export default function DoctorAppointmentsPage() {
                         className="flex-1 px-6 py-4 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-700 shadow-xl shadow-red-600/20 transition-all active:scale-[0.98]"
                       >
                         {isSubmitting ? 'Declining...' : 'Decline'}
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Reject Reschedule Modal */}
+          <AnimatePresence>
+            {showRejectModal && selectedAppointment && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+              >
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                  className="glass-card p-10 max-w-md w-full border-white/60 shadow-2xl"
+                >
+                  <div className="flex justify-between items-start mb-8">
+                    <div>
+                      <h2 className="text-2xl font-black text-slate-800 tracking-tight uppercase">Reject Reschedule</h2>
+                      <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mt-1">Patient: {selectedAppointment.patientName}</p>
+                    </div>
+                    <button onClick={() => setShowRejectModal(false)} className="p-2 hover:bg-slate-100 rounded-xl transition-colors">
+                      <X size={20} className="text-slate-400" />
+                    </button>
+                  </div>
+
+                  <div className="bg-amber-50 p-4 rounded-xl border border-amber-200 mb-6">
+                    <p className="text-xs font-bold text-amber-800">
+                      The patient will have two options after rejection:
+                    </p>
+                    <ul className="text-xs text-amber-700 mt-2 space-y-1 ml-4 list-disc">
+                      <li>Keep their original appointment slot</li>
+                      <li>Cancel with Rs. 250 deduction (Rs. 750 refund)</li>
+                    </ul>
+                  </div>
+
+                  <div className="space-y-6">
+                    <div>
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-3">
+                        Reason for Rejection
+                      </label>
+                      <textarea
+                        value={rejectReason}
+                        onChange={(e) => setRejectReason(e.target.value)}
+                        placeholder="e.g., The new time doesn't work for my schedule..."
+                        className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:ring-4 focus:ring-red-500/10 focus:border-red-500 transition-all font-bold text-slate-700 min-h-[120px] resize-none"
+                        required
+                      />
+                    </div>
+                    <div className="flex gap-3 pt-6">
+                      <button
+                        type="button"
+                        onClick={() => setShowRejectModal(false)}
+                        className="flex-1 px-6 py-4 bg-white border border-slate-200 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all active:scale-[0.98]"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!rejectReason.trim()) {
+                            toast.error('Please provide a reason for rejection');
+                            return;
+                          }
+                          setIsSubmitting(true);
+                          try {
+                            const response = await apiClient.rejectReschedule(selectedAppointment.id, rejectReason.trim());
+                            if (response.success) {
+                              toast.success('Reschedule request rejected. Patient will choose to keep original or cancel.');
+                              setShowRejectModal(false);
+                              setRejectReason('');
+                              setSelectedAppointment(null);
+                              fetchData();
+                            } else {
+                              toast.error(response.message || 'Failed to reject reschedule');
+                            }
+                          } catch (err) {
+                            toast.error('An error occurred');
+                          } finally {
+                            setIsSubmitting(false);
+                          }
+                        }}
+                        disabled={isSubmitting || !rejectReason.trim()}
+                        className="flex-1 px-6 py-4 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-700 shadow-xl shadow-red-600/20 transition-all active:scale-[0.98]"
+                      >
+                        {isSubmitting ? 'Rejecting...' : 'Reject'}
                       </button>
                     </div>
                   </div>
@@ -1077,7 +1171,17 @@ export default function DoctorAppointmentsPage() {
                             </div>
                             <div className="flex gap-3 w-full md:w-auto">
                               {rescheduleSubTab === 'patient' ? (
-                                (req.rescheduleStatus === 'PENDING' || !req.rescheduleStatus) ? (
+                                // Patient Initiated - show Approve, Reject buttons (or Reschedule rejection waiting)
+                                req.rescheduleRejected ? (
+                                  <div className="flex flex-col items-end gap-2">
+                                    <span className="px-6 py-3.5 bg-amber-100 text-amber-700 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center">
+                                      Rejected - Waiting for Patient Choice
+                                    </span>
+                                    <span className="text-[9px] text-slate-500 font-medium">
+                                      Patient will keep original slot or cancel
+                                    </span>
+                                  </div>
+                                ) : (req.rescheduleStatus === 'PENDING' || !req.rescheduleStatus) ? (
                                 <>
                                   <button
                                     onClick={async () => {
@@ -1104,11 +1208,11 @@ export default function DoctorAppointmentsPage() {
                                   <button
                                     onClick={() => {
                                       setSelectedAppointment(req);
-                                      setShowRescheduleForm(true);
+                                      setRejectReason('');                                      setShowRejectModal(true);
                                     }}
-                                    className="flex-1 md:flex-none px-8 py-3.5 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-black shadow-xl shadow-slate-900/20 transition-all active:scale-[0.98]"
+                                    className="flex-1 md:flex-none px-8 py-3.5 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-700 shadow-xl shadow-red-600/20 transition-all active:scale-[0.98]"
                                   >
-                                    Reschedule
+                                    Reject
                                   </button>
                                 </>
                                 ) : req.rescheduleStatus === 'APPROVED' ? (
@@ -1117,39 +1221,53 @@ export default function DoctorAppointmentsPage() {
                                   <span className="px-6 py-3.5 bg-red-100 text-red-700 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center">Reschedule Rejected</span>
                                 ) : null
                               ) : (
-                                <>
-                                  <button
-                                    onClick={async () => {
-                                      setIsSubmitting(true);
-                                      try {
-                                        const response = await apiClient.confirmAppointment(req.id);
-                                        if (response.success) {
-                                          toast.success('Reschedule accepted. Appointment confirmed.');
-                                          fetchData();
-                                        } else {
-                                          toast.error(response.message || 'Failed to accept reschedule');
+                                // Doctor Initiated sub-tab
+                                req.patientRespondedToDoctorReschedule ? (
+                                  // Patient has proposed a new date/time - show Accept and Request Another Date
+                                  <>
+                                    <button
+                                      onClick={async () => {
+                                        setIsSubmitting(true);
+                                        try {
+                                          const response = await apiClient.confirmAppointment(req.id);
+                                          if (response.success) {
+                                            toast.success('Reschedule accepted! Appointment confirmed.');
+                                            fetchData();
+                                          } else {
+                                            toast.error(response.message || 'Failed to accept reschedule');
+                                          }
+                                        } catch (err) {
+                                          toast.error('An error occurred');
+                                        } finally {
+                                          setIsSubmitting(false);
                                         }
-                                      } catch (err) {
-                                        toast.error('An error occurred');
-                                      } finally {
-                                        setIsSubmitting(false);
-                                      }
-                                    }}
-                                    disabled={isSubmitting}
-                                    className="flex-1 md:flex-none px-8 py-3.5 bg-emerald-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 shadow-xl shadow-emerald-600/20 transition-all active:scale-[0.98]"
-                                  >
-                                    {isSubmitting ? 'Accepting...' : 'Accept'}
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      setSelectedAppointment(req);
-                                      setShowRescheduleForm(true);
-                                    }}
-                                    className="flex-1 md:flex-none px-8 py-3.5 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-black shadow-xl shadow-slate-900/20 transition-all active:scale-[0.98]"
-                                  >
-                                    Request Another Date
-                                  </button>
-                                </>
+                                      }}
+                                      disabled={isSubmitting}
+                                      className="flex-1 md:flex-none px-8 py-3.5 bg-emerald-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 shadow-xl shadow-emerald-600/20 transition-all active:scale-[0.98]"
+                                    >
+                                      {isSubmitting ? 'Accepting...' : 'Accept'}
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        setSelectedAppointment(req);
+                                        setShowRescheduleForm(true);
+                                      }}
+                                      className="flex-1 md:flex-none px-8 py-3.5 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-black shadow-xl shadow-slate-900/20 transition-all active:scale-[0.98]"
+                                    >
+                                      Request Another Date
+                                    </button>
+                                  </>
+                                ) : (
+                                  // Waiting for patient to respond
+                                  <div className="flex flex-col items-end gap-2">
+                                    <span className="px-6 py-3.5 bg-amber-100 text-amber-700 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center">
+                                      Waiting for Patient Response
+                                    </span>
+                                    <span className="text-[9px] text-slate-500 font-medium">
+                                      Patient will pick a new date/time or cancel
+                                    </span>
+                                  </div>
+                                )
                               )}
                             </div>
                           </div>
