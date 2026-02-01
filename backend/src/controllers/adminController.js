@@ -6,48 +6,63 @@ export const downloadAppointmentsController = async (req, res, next) => {
     const { format = 'csv', status, payment_status } = req.query;
     const data = await getAllAppointmentsForDownload(status, payment_status);
     const fmt = String(format).toLowerCase();
+    const columns = getTabColumns(status);
 
     if (fmt === 'json') {
+      // Filter data to only include tab-relevant columns
+      const filteredData = data.map(item => {
+        const filtered = {};
+        columns.forEach(col => {
+          let value = item[col.key];
+          if (col.key.includes('_at') || col.key === 'appointment_date') {
+            value = value ? new Date(value).toLocaleString() : '';
+          }
+          filtered[col.key] = value;
+        });
+        return filtered;
+      });
       res.setHeader('Content-Type', 'application/json');
-      res.setHeader('Content-Disposition', 'attachment; filename="appointments.json"');
-      return res.status(200).send(JSON.stringify(data, null, 2));
+      res.setHeader('Content-Disposition', `attachment; filename="appointments_${status || 'all'}.json"`);
+      return res.status(200).send(JSON.stringify(filteredData, null, 2));
     }
 
     if (fmt === 'pdf') {
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', 'attachment; filename="appointments.pdf"');
+      res.setHeader('Content-Disposition', `attachment; filename="appointments_${status || 'all'}.pdf"`);
       const PDFDocument = (await import('pdfkit')).default;
       const doc = new PDFDocument({ margin: 36, layout: 'landscape' });
       doc.pipe(res);
-      doc.fontSize(20).text('Appointments Report', { align: 'center' });
+      
+      // Title
+      const statusLabel = status || 'All';
+      doc.fontSize(20).text(`${statusLabel} Appointments Report`, { align: 'center' });
       doc.moveDown(0.2);
       doc.fontSize(10).fillColor('#666').text(`Generated: ${new Date().toLocaleString()}`, { align: 'center' });
       doc.moveDown(1.5);
+      
       const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-      const columns = [
-        { key: 'appointment_date', label: 'Date', width: pageWidth * 0.09 },
-        { key: 'slot_start_time', label: 'Start', width: pageWidth * 0.06 },
-        { key: 'patient_name', label: 'Patient', width: pageWidth * 0.11 },
-        { key: 'doctor_name', label: 'Doctor', width: pageWidth * 0.11 },
-        { key: 'status', label: 'Status', width: pageWidth * 0.08 },
-        { key: 'reason', label: 'Reason', width: pageWidth * 0.10 },
-        { key: 'payment_status', label: 'Payment', width: pageWidth * 0.07 },
-        { key: 'challan_number', label: 'Challan', width: pageWidth * 0.09 },
-        { key: 'prescription', label: 'Prescription', width: pageWidth * 0.11 },
-        { key: 'instructions', label: 'Instructions', width: pageWidth * 0.10 },
-        { key: 'cancellation_reason', label: 'Cancel Reason', width: pageWidth * 0.10 },
-      ];
+      const columnWidth = pageWidth / columns.length;
+      
+      // Build PDF columns with dynamic widths
+      const pdfColumns = columns.map(col => ({
+        key: col.key,
+        label: col.label,
+        width: columnWidth
+      }));
+      
       const startX = doc.page.margins.left;
       const padding = 4;
-      const headerRow = columns.reduce((acc, c) => ({ ...acc, [c.key]: c.label }), {});
+      const headerRow = pdfColumns.reduce((acc, c) => ({ ...acc, [c.key]: c.label }), {});
+      
       const measureRowHeight = (row, isHeader = false) => {
-        const heights = columns.map((col) => {
+        const heights = pdfColumns.map((col) => {
           const text = row[col.key] ? String(row[col.key]) : '';
-          doc.fontSize(isHeader ? 10 : 9);
+          doc.fontSize(isHeader ? 9 : 8);
           return doc.heightOfString(text, { width: col.width - padding * 2 }) + padding * 2;
         });
         return Math.max(isHeader ? 22 : 18, ...heights);
       };
+      
       const drawRow = (row, isHeader = false) => {
         const height = measureRowHeight(row, isHeader);
         if (doc.y + height > doc.page.height - doc.page.margins.bottom) {
@@ -57,7 +72,7 @@ export const downloadAppointmentsController = async (req, res, next) => {
         }
         let currX = startX;
         const currY = doc.y;
-        columns.forEach((col) => {
+        pdfColumns.forEach((col) => {
           const text = row[col.key] ? String(row[col.key]) : '';
           if (isHeader) {
             doc.save().rect(currX, currY, col.width, height).fill('#f8fafc').restore();
@@ -65,7 +80,7 @@ export const downloadAppointmentsController = async (req, res, next) => {
           doc.rect(currX, currY, col.width, height).lineWidth(0.5).stroke('#e2e8f0');
           doc.save();
           doc.rect(currX + padding, currY + padding, col.width - padding * 2, height - padding * 2).clip();
-          doc.fontSize(isHeader ? 10 : 9)
+          doc.fontSize(isHeader ? 9 : 8)
             .fillColor(isHeader ? '#0f172a' : '#334155')
             .text(text, currX + padding, currY + padding, {
               width: col.width - padding * 2,
@@ -77,20 +92,27 @@ export const downloadAppointmentsController = async (req, res, next) => {
         });
         doc.y = currY + height;
       };
+      
       drawRow(headerRow, true);
       data.forEach(item => {
-        drawRow({
-          ...item,
-          appointment_date: item.appointment_date ? new Date(item.appointment_date).toLocaleDateString() : 'N/A',
+        const row = {};
+        pdfColumns.forEach(col => {
+          let value = item[col.key];
+          if (col.key.includes('_at') || col.key === 'appointment_date') {
+            value = value ? new Date(value).toLocaleDateString() : '';
+          }
+          row[col.key] = value;
         });
+        drawRow(row);
       });
       doc.end();
       return;
     }
-    // CSV formatting via service
-    const csvContent = await formatAppointmentsForCSV(data);
+    
+    // CSV formatting via service with tab-specific columns
+    const csvContent = await formatAppointmentsForCSV(data, status);
     res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename="appointments.csv"');
+    res.setHeader('Content-Disposition', `attachment; filename="appointments_${status || 'all'}.csv"`);
     return res.status(200).send(csvContent);
   } catch (error) {
     next(error);
@@ -129,6 +151,7 @@ import {
   formatAlertsForCSV,
   getAllAppointmentsForDownload,
   formatAppointmentsForCSV,
+  getTabColumns,
 } from '../services/adminService.js';
 import { successResponse, errorResponse } from '../utils/response.js';
 import { logSuccess, logFailure } from '../utils/logger.js';

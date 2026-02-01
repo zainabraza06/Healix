@@ -1,3 +1,66 @@
+// Get column configuration for each tab
+export const getTabColumns = (status) => {
+  const baseColumns = [
+    { key: 'id', label: 'ID' },
+    { key: 'appointment_date', label: 'Date' },
+    { key: 'slot_start_time', label: 'Start Time' },
+    { key: 'slot_end_time', label: 'End Time' },
+    { key: 'patient_name', label: 'Patient' },
+    { key: 'patient_email', label: 'Patient Email' },
+    { key: 'doctor_name', label: 'Doctor' },
+    { key: 'appointment_type', label: 'Type' },
+  ];
+
+  switch (status) {
+    case 'CONFIRMED':
+      return [
+        ...baseColumns,
+        { key: 'reason', label: 'Reason' },
+        { key: 'payment_status', label: 'Payment Status' },
+        { key: 'payment_amount', label: 'Amount' },
+        { key: 'challan_number', label: 'Challan Number' },
+        { key: 'paid_at', label: 'Paid At' },
+        { key: 'meeting_link', label: 'Meeting Link' },
+        { key: 'location', label: 'Location' },
+      ];
+    case 'REQUESTED':
+      return [
+        ...baseColumns,
+        { key: 'reason', label: 'Reason' },
+        { key: 'notes', label: 'Notes' },
+        { key: 'created_at', label: 'Requested At' },
+      ];
+    case 'COMPLETED':
+      return [
+        ...baseColumns,
+        { key: 'reason', label: 'Reason' },
+        { key: 'payment_status', label: 'Payment Status' },
+        { key: 'payment_amount', label: 'Amount' },
+        { key: 'prescription', label: 'Prescription' },
+        { key: 'instructions', label: 'Instructions' },
+        { key: 'completed_at', label: 'Completed At' },
+      ];
+    case 'CANCELLED':
+      return [
+        ...baseColumns,
+        { key: 'reason', label: 'Visit Reason' },
+        { key: 'cancellation_reason', label: 'Cancellation Reason' },
+        { key: 'cancelled_by', label: 'Cancelled By' },
+        { key: 'cancelled_at', label: 'Cancelled At' },
+        { key: 'refund_amount', label: 'Refund Amount' },
+      ];
+    case 'PAST':
+      return [
+        ...baseColumns,
+        { key: 'reason', label: 'Reason' },
+        { key: 'payment_status', label: 'Payment Status' },
+        { key: 'notes', label: 'Notes' },
+      ];
+    default:
+      return baseColumns;
+  }
+};
+
 // Get all appointments for download (CSV/JSON/PDF)
 export const getAllAppointmentsForDownload = async (status, payment_status) => {
   try {
@@ -23,6 +86,7 @@ export const getAllAppointmentsForDownload = async (status, payment_status) => {
       }
     }
     if (payment_status) query.payment_status = payment_status;
+    
     const appointments = await Appointment.find(query)
       .populate({
         path: 'patient_id',
@@ -35,38 +99,58 @@ export const getAllAppointmentsForDownload = async (status, payment_status) => {
       .populate('prescription_id')
       .sort({ appointment_date: -1, slot_start_time: -1 })
       .lean();
+
+    // Map all possible fields - will be filtered by tab columns later
     return appointments.map(a => ({
       id: a._id?.toString?.(),
       appointment_date: a.appointment_date,
       slot_start_time: a.slot_start_time,
       slot_end_time: a.slot_end_time,
       patient_name: a.patient_id?.user_id?.full_name || a.patient_id?.user_id?.name || 'N/A',
+      patient_email: a.patient_id?.user_id?.email || 'N/A',
       doctor_name: a.doctor_id?.user_id?.full_name || a.doctor_id?.user_id?.name || 'N/A',
+      appointment_type: a.appointment_type,
       status: a.status,
-      payment_status: a.payment_status,
-      prescription: a.prescription_id?.medications ? JSON.stringify(a.prescription_id.medications) : '',
+      reason: a.reason || '',
+      notes: a.notes || '',
+      payment_status: a.payment_status || 'PENDING',
+      payment_amount: a.payment_amount || 0,
+      challan_number: a.challan_number || '',
+      paid_at: a.paid_at,
+      meeting_link: a.meeting_link || '',
+      location: a.location || '',
+      prescription: a.prescription_id?.medications 
+        ? a.prescription_id.medications.map(m => `${m.name} (${m.dosage}, ${m.frequency})`).join('; ') 
+        : '',
       instructions: a.prescription_id?.notes || '',
+      completed_at: a.completed_at,
+      cancellation_reason: a.cancellation_reason || '',
+      cancelled_by: a.cancelled_by || '',
+      cancelled_at: a.cancelled_at,
+      refund_amount: a.refund_amount || 0,
+      created_at: a.created_at,
     }));
   } catch (error) {
     throw new Error(`Failed to fetch appointments for download: ${error.message}`);
   }
 };
 
-// Format appointments for CSV download
-export const formatAppointmentsForCSV = async (data) => {
-  const headers = ['id', 'appointment_date', 'slot_start_time', 'slot_end_time', 'patient_name', 'doctor_name', 'status', 'payment_status', 'prescription', 'instructions'];
-  const rows = (data || []).map((a) => [
-    a.id,
-    a.appointment_date ? new Date(a.appointment_date).toISOString() : '',
-    a.slot_start_time,
-    a.slot_end_time,
-    a.patient_name,
-    a.doctor_name,
-    a.status,
-    a.payment_status,
-    a.prescription,
-    a.instructions,
-  ]);
+// Format appointments for CSV download with tab-specific columns
+export const formatAppointmentsForCSV = async (data, status) => {
+  const columns = getTabColumns(status);
+  const headers = columns.map(c => c.label);
+  
+  const rows = (data || []).map((a) => 
+    columns.map(col => {
+      let value = a[col.key];
+      // Format dates
+      if (col.key.includes('_at') || col.key === 'appointment_date') {
+        value = value ? new Date(value).toLocaleString() : '';
+      }
+      return value;
+    })
+  );
+  
   const csv = [headers.join(','), ...rows.map((r) => r.map((v) => {
     const s = v == null ? '' : String(v);
     if (s.includes(',') || s.includes('"') || s.includes('\n')) {
