@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '@/lib/apiClient';
 import ProtectedLayout from '@/components/ProtectedLayout';
-import { Loader, ArrowLeft, Calendar, Clock, Download, FileText, X } from 'lucide-react';
+import { Loader, ArrowLeft, Calendar, Download, FileText, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import dynamic from 'next/dynamic';
@@ -287,11 +287,20 @@ export default function AdminAppointmentsPage() {
                                                 <th className="text-left py-3 px-4 font-semibold text-slate-700">Doctor</th>
                                                 <th className="text-left py-3 px-4 font-semibold text-slate-700">Date & Time</th>
                                                 <th className="text-left py-3 px-4 font-semibold text-slate-700">Type</th>
-                                                {(activeTab === 'CONFIRMED' || activeTab === 'COMPLETED') && (
+                                                {activeTab === 'REQUESTED' && (
+                                                    <th className="text-left py-3 px-4 font-semibold text-slate-700">Reason</th>
+                                                )}
+                                                {(activeTab === 'CONFIRMED' || activeTab === 'COMPLETED' || activeTab === 'PAST') && (
                                                     <th className="text-left py-3 px-4 font-semibold text-slate-700">Payment</th>
                                                 )}
+                                                {activeTab === 'COMPLETED' && (
+                                                    <th className="text-left py-3 px-4 font-semibold text-slate-700">Prescription</th>
+                                                )}
                                                 {activeTab === 'CANCELLED' && (
-                                                    <th className="text-left py-3 px-4 font-semibold text-slate-700">Cancel Reason</th>
+                                                    <>
+                                                        <th className="text-left py-3 px-4 font-semibold text-slate-700">Cancel Reason</th>
+                                                        <th className="text-left py-3 px-4 font-semibold text-slate-700">Cancelled By</th>
+                                                    </>
                                                 )}
                                                 <th className="text-center py-3 px-4 font-semibold text-slate-700">Details</th>
                                             </tr>
@@ -308,31 +317,59 @@ export default function AdminAppointmentsPage() {
                                                     </td>
                                                     <td className="py-3 px-4 text-slate-600">
                                                         <p>{formatDate(apt.appointment_date)}</p>
-                                                        <p className="text-xs text-slate-500">{apt.slot_start_time || apt.appointment_time}</p>
+                                                        <p className="text-xs text-slate-500">{apt.slot_start_time || apt.appointment_time || '—'}</p>
                                                     </td>
                                                     <td className="py-3 px-4">
                                                         <span className={`px-3 py-1 rounded-full text-xs font-semibold ${apt.appointment_type === 'ONLINE' ? 'bg-blue-100 text-blue-700' : 'bg-teal-100 text-teal-700'}`}>
                                                             {apt.appointment_type === 'ONLINE' ? 'Online' : 'In-Person'}
                                                         </span>
                                                     </td>
-                                                    {(activeTab === 'CONFIRMED' || activeTab === 'COMPLETED') && (
+                                                    {activeTab === 'REQUESTED' && (
+                                                        <td className="py-3 px-4">
+                                                            <p className="text-slate-600 line-clamp-2 max-w-[200px]">
+                                                                {apt.reason || '—'}
+                                                            </p>
+                                                        </td>
+                                                    )}
+                                                    {(activeTab === 'CONFIRMED' || activeTab === 'COMPLETED' || activeTab === 'PAST') && (
                                                         <td className="py-3 px-4">
                                                             <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getPaymentColor(apt.payment_status || 'PENDING')}`}>
                                                                 {apt.payment_status || 'PENDING'}
                                                             </span>
+                                                            {apt.payment_amount && (
+                                                                <p className="text-xs text-slate-500 mt-1">Rs. {apt.payment_amount}</p>
+                                                            )}
+                                                        </td>
+                                                    )}
+                                                    {activeTab === 'COMPLETED' && (
+                                                        <td className="py-3 px-4">
+                                                            {apt.prescription?.medications && apt.prescription.medications.length > 0 ? (
+                                                                <p className="text-slate-600 text-xs line-clamp-2 max-w-[150px]">
+                                                                    {apt.prescription.medications.map(m => m.name).join(', ')}
+                                                                </p>
+                                                            ) : (
+                                                                <span className="text-slate-400 text-xs">No prescription</span>
+                                                            )}
                                                         </td>
                                                     )}
                                                     {activeTab === 'CANCELLED' && (
-                                                        <td className="py-3 px-4">
-                                                            <p className="text-slate-600 line-clamp-2 max-w-[200px]">
-                                                                {apt.cancellation_reason || '—'}
-                                                            </p>
-                                                            {apt.cancelled_by && (
-                                                                <p className="text-xs text-slate-500 mt-1">
-                                                                    by {apt.cancelled_by}
+                                                        <>
+                                                            <td className="py-3 px-4">
+                                                                <p className="text-slate-600 line-clamp-2 max-w-[200px]">
+                                                                    {apt.cancellation_reason || '—'}
                                                                 </p>
-                                                            )}
-                                                        </td>
+                                                            </td>
+                                                            <td className="py-3 px-4">
+                                                                <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                                                    apt.cancelled_by === 'PATIENT' ? 'bg-orange-100 text-orange-700' :
+                                                                    apt.cancelled_by === 'DOCTOR' ? 'bg-blue-100 text-blue-700' :
+                                                                    apt.cancelled_by === 'ADMIN' ? 'bg-purple-100 text-purple-700' :
+                                                                    'bg-slate-100 text-slate-700'
+                                                                }`}>
+                                                                    {apt.cancelled_by || '—'}
+                                                                </span>
+                                                            </td>
+                                                        </>
                                                     )}
                                                     <td className="py-3 px-4 text-center" onClick={(e) => e.stopPropagation()}>
                                                         <button
@@ -467,13 +504,27 @@ export default function AdminAppointmentsPage() {
                                     {/* CONFIRMED: show payment details */}
                                     {selectedAppointment.status === 'CONFIRMED' && (
                                         <div className="border-t border-slate-200 pt-4">
-                                            <h3 className="font-bold text-lg text-slate-800 mb-3">Payment</h3>
+                                            <h3 className="font-bold text-lg text-slate-800 mb-3">Payment & Venue</h3>
                                             <div className="bg-amber-50 p-4 rounded-xl border border-amber-100 space-y-2">
-                                                <p><span className="text-slate-600 font-medium">Status:</span> <span className={getPaymentColor(selectedAppointment.payment_status || 'PENDING')}>{selectedAppointment.payment_status || 'PENDING'}</span></p>
+                                                <p><span className="text-slate-600 font-medium">Payment Status:</span> <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${getPaymentColor(selectedAppointment.payment_status || 'PENDING')}`}>{selectedAppointment.payment_status || 'PENDING'}</span></p>
                                                 <p><span className="text-slate-600 font-medium">Amount:</span> Rs. {selectedAppointment.payment_amount ?? '—'}</p>
-                                                <p><span className="text-slate-600 font-medium">Challan:</span> {selectedAppointment.challan_number || '—'}</p>
+                                                {selectedAppointment.challan_number && <p><span className="text-slate-600 font-medium">Challan:</span> {selectedAppointment.challan_number}</p>}
                                                 {selectedAppointment.paid_at && <p><span className="text-slate-600 font-medium">Paid at:</span> {formatDate(selectedAppointment.paid_at)}</p>}
                                             </div>
+                                            {selectedAppointment.appointment_type === 'ONLINE' && selectedAppointment.meeting_link && (
+                                                <div className="mt-3 bg-blue-50 p-4 rounded-xl border border-blue-100">
+                                                    <p className="text-slate-600 font-medium mb-1">Meeting Link:</p>
+                                                    <a href={selectedAppointment.meeting_link} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline break-all text-sm">
+                                                        {selectedAppointment.meeting_link}
+                                                    </a>
+                                                </div>
+                                            )}
+                                            {selectedAppointment.appointment_type === 'OFFLINE' && selectedAppointment.location && (
+                                                <div className="mt-3 bg-teal-50 p-4 rounded-xl border border-teal-100">
+                                                    <p className="text-slate-600 font-medium mb-1">Location:</p>
+                                                    <p className="text-slate-800 text-sm">{selectedAppointment.location}</p>
+                                                </div>
+                                            )}
                                         </div>
                                     )}
 
@@ -484,6 +535,7 @@ export default function AdminAppointmentsPage() {
                                             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
                                                 <p><span className="text-slate-600 font-medium">Reason:</span> {selectedAppointment.reason || '—'}</p>
                                                 {selectedAppointment.notes && <p><span className="text-slate-600 font-medium">Notes:</span> {selectedAppointment.notes}</p>}
+                                                {selectedAppointment.created_at && <p><span className="text-slate-600 font-medium">Requested at:</span> {formatDate(selectedAppointment.created_at)}</p>}
                                             </div>
                                         </div>
                                     )}
@@ -491,6 +543,15 @@ export default function AdminAppointmentsPage() {
                                     {/* COMPLETED: prescription and instructions */}
                                     {selectedAppointment.status === 'COMPLETED' && (
                                         <>
+                                            {/* Payment Info */}
+                                            <div className="border-t border-slate-200 pt-4">
+                                                <h3 className="font-bold text-lg text-slate-800 mb-3">Payment Details</h3>
+                                                <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100 space-y-2">
+                                                    <p><span className="text-slate-600 font-medium">Payment Status:</span> <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${getPaymentColor(selectedAppointment.payment_status || 'PENDING')}`}>{selectedAppointment.payment_status || 'PENDING'}</span></p>
+                                                    <p><span className="text-slate-600 font-medium">Amount:</span> Rs. {selectedAppointment.payment_amount ?? '—'}</p>
+                                                    {selectedAppointment.completed_at && <p><span className="text-slate-600 font-medium">Completed at:</span> {formatDate(selectedAppointment.completed_at)}</p>}
+                                                </div>
+                                            </div>
                                             <div className="border-t border-slate-200 pt-4">
                                                 <h3 className="font-bold text-lg text-slate-800 mb-3">Prescription</h3>
                                                 <div className="bg-blue-50 p-4 rounded-lg">
