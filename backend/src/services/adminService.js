@@ -66,24 +66,7 @@ export const getAllAppointmentsForDownload = async (status, payment_status) => {
   try {
     const query = {};
     if (status) {
-      if (status === 'PAST') {
-        const startOfToday = new Date();
-        startOfToday.setHours(0, 0, 0, 0);
-        const endOfToday = new Date();
-        endOfToday.setHours(23, 59, 59, 999);
-        const currentTime = new Date().toTimeString().slice(0, 5);
-
-        query.status = { $nin: ['COMPLETED', 'NO_SHOW', 'CANCELLED'] };
-        query.$or = [
-          { appointment_date: { $lt: startOfToday } },
-          {
-            appointment_date: { $gte: startOfToday, $lte: endOfToday },
-            slot_end_time: { $lte: currentTime },
-          },
-        ];
-      } else {
-        query.status = status;
-      }
+      query.status = status;
     }
     if (payment_status) query.payment_status = payment_status;
     
@@ -776,24 +759,7 @@ export const getPaginatedAppointments = async (page = 0, size = 10, status, paym
   try {
     const query = {};
     if (status) {
-      if (status === 'PAST') {
-        const startOfToday = new Date();
-        startOfToday.setHours(0, 0, 0, 0);
-        const endOfToday = new Date();
-        endOfToday.setHours(23, 59, 59, 999);
-        const currentTime = new Date().toTimeString().slice(0, 5);
-
-        query.status = { $nin: ['COMPLETED', 'NO_SHOW', 'CANCELLED'] };
-        query.$or = [
-          { appointment_date: { $lt: startOfToday } },
-          {
-            appointment_date: { $gte: startOfToday, $lte: endOfToday },
-            slot_end_time: { $lte: currentTime },
-          },
-        ];
-      } else {
-        query.status = status;
-      }
+      query.status = status;
     }
     if (payment_status) query.payment_status = payment_status;
 
