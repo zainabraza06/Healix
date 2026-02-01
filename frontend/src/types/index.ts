@@ -192,6 +192,14 @@ export interface DoctorDashboard {
     avgWaitTime: number;
     emergencyAlertsCount: number;
   };
+  caseMix?: {
+    onlineCount: number;
+    offlineCount: number;
+    completedCount: number;
+    cancelledCount: number;
+    pastCount: number;
+    alertsCount: number;
+  };
 }
 
 // Admin Types
