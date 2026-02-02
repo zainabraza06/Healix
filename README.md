@@ -1,6 +1,6 @@
 <p align="center">
   <img src="https://img.shields.io/badge/MERN-Stack-green?style=for-the-badge" alt="MERN Stack"/>
-  <img src="https://img.shields.io/badge/License-ISC-blue?style=for-the-badge" alt="License"/>
+
   <img src="https://img.shields.io/badge/Node.js-18+-339933?style=for-the-badge&logo=node.js&logoColor=white" alt="Node.js"/>
   <img src="https://img.shields.io/badge/Next.js-14-black?style=for-the-badge&logo=next.js&logoColor=white" alt="Next.js"/>
 </p>
