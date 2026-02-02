@@ -46,7 +46,6 @@ A comprehensive, full-stack telemedicine platform that enables seamless healthca
 - **Real-time Updates** - Socket.IO for live notifications and chat
 - **Responsive Design** - Works seamlessly on desktop and mobile
 - **3D Animated UI** - Beautiful Three.js powered backgrounds
-- **Dark Mode** - Modern dark-themed interface
 
 ## 🛠️ Tech Stack
 
