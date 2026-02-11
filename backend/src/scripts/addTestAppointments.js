@@ -243,8 +243,8 @@ const addTestAppointments = async () => {
       createdCount += 1;
     }
 
-    console.log(`✅ Successfully added ${createdCount} test appointments`);
-    console.log('🔍 Test coverage includes: past completed, past no-show, past confirmed, today past slot, upcoming confirmed, requested, reschedule requested, cancelled.');
+    console.log(`Successfully added ${createdCount} test appointments`);
+    console.log('Test coverage includes: completed, past no-show, confirmed, requested, reschedule_requested, cancelled.');
 
   } catch (error) {
     console.error('❌ Error adding test appointments:', error.message);
