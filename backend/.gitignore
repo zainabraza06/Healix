@@ -7,6 +7,15 @@ yarn.lock
 .env
 .env.local
 .env.production
+.env.*
+!.env.example
+
+# Secret / deployment config — never commit these
+cloudrun-env.yaml
+*-env.yaml
+*-secrets.yaml
+*.secret.yaml
+service-account*.json
 
 # Logs
 logs/
