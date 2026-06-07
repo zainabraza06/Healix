@@ -125,11 +125,13 @@ export default function AdminDoctorsPage() {
         searchTerm,
         requestFilter === 'ALL' ? undefined : requestFilter
       );
-        setDoctors(response.data.content || []
+      if (response.success) {
+        setDoctors(response.data?.content || []);
       } else {
         toast.error(response.message || 'Failed to load doctors');
       }
-   } caast.error('An error occurred while fetching doctors');
+    } catch (err) {
+      toast.error('An error occurred while fetching doctors');
       console.error(err);
     } finally {
       setIsLoading(false);

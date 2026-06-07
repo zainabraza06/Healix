@@ -1,30 +1,53 @@
-
+# ─── Dependencies ───────────────────────────────────────────────────────────────
 node_modules/
+.pnp
+.pnp.js
+
+# ─── Next.js build output ────────────────────────────────────────────────────────
+.next/
+out/
+dist/
+build/
+.cache/
+
+# ─── Environment files (never commit real secrets) ───────────────────────────────
+.env
+.env.*
+!.env.example
+!.env.local.example
+!.env.*.example
+
+# ─── Log files ───────────────────────────────────────────────────────────────────
+logs/
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-
-.next/
-out/
-dist/
-.cache/
-
-.env
-.env.*
-!.env.example
-
-
-.vscode/
+# ─── IDE & editor files ──────────────────────────────────────────────────────────
 .idea/
 *.iml
+*.swp
+*.swo
 
+# ─── OS files ────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+desktop.ini
 
-
+# ─── Test output ─────────────────────────────────────────────────────────────────
 coverage/
-logs/
+.nyc_output/
+
+# ─── Temporary files ─────────────────────────────────────────────────────────────
 tmp/
 temp/
+
+# ─── Backend: uploaded files ─────────────────────────────────────────────────────
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# ─── TypeScript ──────────────────────────────────────────────────────────────────
+*.tsbuildinfo
+next-env.d.ts

@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/apiClient';
 import toast from 'react-hot-toast';
 import dynamic from 'next/dynamic';
-import { ArrowLeft, Loader, User, Stethoscope } from 'lucide-react';
+import { ArrowLeft, Loader, User, Users, Stethoscope } from 'lucide-react';
 
 const Scene = dynamic(() => import('@/components/canvas/Scene'), { ssr: false });
 const FloatingIcons = dynamic(() => import('@/components/canvas/FloatingIcons'), { ssr: false });
@@ -26,6 +26,9 @@ export default function RegisterPage() {
     gender: '',
     address: '',
     yearsOfExperience: '',
+    licenseNumber: '',
+    specialization: '',
+    qualifications: '',
     emergencyContactName: '',
     emergencyContactPhone: '',
     emergencyContactEmail: '',
@@ -116,7 +119,6 @@ export default function RegisterPage() {
         phoneNumber: formData.phoneNumber,
         licenseNumber: formData.licenseNumber,
         specialization: formData.specialization,
-        qualifications: formData.qualifications,
         qualifications: formData.qualifications,
         yearsOfExperience: parseInt(formData.yearsOfExperience),
         emergencyContactName: formData.emergencyContactName,
