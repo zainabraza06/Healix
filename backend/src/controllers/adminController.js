@@ -198,6 +198,72 @@ export const approveApplicationController = async (req, res, next) => {
   }
 };
 
+// Used by the frontend: POST /admin/approve-doctor { doctorId, doctorEmail }
+export const approveDoctorController = async (req, res, next) => {
+  try {
+    const { doctorId, doctorEmail } = req.body;
+
+    if (!doctorId) {
+      return res.status(400).json(errorResponse('doctorId is required'));
+    }
+
+    await approveDoctorApplication(doctorId, null, doctorEmail);
+    res.json(successResponse('Doctor application approved. Login credentials sent to doctor.'));
+    await logSuccess({
+      req,
+      adminId: req?.user?._id,
+      action: 'APPROVE_DOCTOR',
+      entityType: 'DOCTOR',
+      entityId: doctorId,
+      description: `Doctor application approved: ${doctorId}`,
+    });
+  } catch (error) {
+    await logFailure({
+      req,
+      adminId: req?.user?._id,
+      action: 'APPROVE_DOCTOR',
+      entityType: 'DOCTOR',
+      entityId: req?.body?.doctorId,
+      description: 'Doctor approval failed',
+      error,
+    });
+    next(error);
+  }
+};
+
+// Used by the frontend: POST /admin/reject-doctor { doctorId, reason, doctorEmail }
+export const rejectDoctorController = async (req, res, next) => {
+  try {
+    const { doctorId, reason, doctorEmail } = req.body;
+
+    if (!doctorId || !reason) {
+      return res.status(400).json(errorResponse('doctorId and reason are required'));
+    }
+
+    await rejectDoctorApplication(doctorId, reason, doctorEmail);
+    res.json(successResponse('Doctor application rejected. Notification sent to doctor.'));
+    await logSuccess({
+      req,
+      adminId: req?.user?._id,
+      action: 'REJECT_DOCTOR',
+      entityType: 'DOCTOR',
+      entityId: doctorId,
+      description: `Doctor application rejected: ${doctorId}. Reason: ${reason}`,
+    });
+  } catch (error) {
+    await logFailure({
+      req,
+      adminId: req?.user?._id,
+      action: 'REJECT_DOCTOR',
+      entityType: 'DOCTOR',
+      entityId: req?.body?.doctorId,
+      description: 'Doctor rejection failed',
+      error,
+    });
+    next(error);
+  }
+};
+
 export const rejectApplicationController = async (req, res, next) => {
   try {
     const { doctorId, reason } = req.body;

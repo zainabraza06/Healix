@@ -4,6 +4,8 @@ import {
   approveApplicationController,
   rejectApplicationController,
   processApplicationController,
+  approveDoctorController,
+  rejectDoctorController,
   getDashboardStatsController,
   getAlertStatsController,
   getAppointmentStatsController,
@@ -85,6 +87,10 @@ router.get('/applications', getDoctorApplicationsController);
 router.post('/applications/approve', approveApplicationController);
 router.post('/applications/reject', rejectApplicationController);
 router.post('/applications/decision', processApplicationController);
+
+// Frontend-facing approve/reject endpoints (include password + email)
+router.post('/approve-doctor', approveDoctorController);
+router.post('/reject-doctor', rejectDoctorController);
 
 // Patient management endpoints (disable/enable status)
 router.get('/patients/:patientId', getPatientByIdController);

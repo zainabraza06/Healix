@@ -104,15 +104,13 @@ export default function PendingDoctorsPage() {
 
     try {
       setActionLoading(true);
-      const password = generatePassword();
 
       await apiClient.approveDoctor({
         doctorId: selectedDoctor._id,
-        password: password,
         doctorEmail: selectedDoctor.user_id.email,
       });
 
-      toast.success('Doctor approved! Email sent with credentials.');
+      toast.success('Doctor approved! Approval email sent.');
       setShowApprovalModal(false);
       setGeneratedPassword('');
       setSelectedDoctor(null);

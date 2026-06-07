@@ -142,15 +142,13 @@ export default function AdminDashboard() {
   const handleApprove = async (doctor: any) => {
     try {
       setActionLoading(doctor._id);
-      const password = generateRandomPassword();
       const response = await apiClient.approveDoctor({
         doctorId: doctor._id,
-        password: password,
         doctorEmail: doctor.user_id.email
       });
 
       if (response.success) {
-        toast.success(`Application approved! Credentials sent to ${doctor.user_id.email}`);
+        toast.success(`Application approved! Approval email sent to ${doctor.user_id.email}`);
         fetchDashboardStats();
       } else {
         toast.error(response.message || 'Failed to approve');

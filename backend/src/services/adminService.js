@@ -910,56 +910,40 @@ export const getSystemActivity = async (startDate, endDate) => {
 /**
  * Approve doctor application
  */
-export const approveDoctorApplication = async (doctorId, password, doctorEmail) => {
+export const approveDoctorApplication = async (doctorId, _password, doctorEmail) => {
   try {
     const doctor = await Doctor.findByIdAndUpdate(
       doctorId,
-      {
-        application_status: 'APPROVED',
-        approved_at: new Date(),
-      },
+      { application_status: 'APPROVED', approved_at: new Date() },
       { new: true }
     ).populate('user_id');
 
-    if (!doctor) {
-      throw new Error('Doctor not found');
-    }
+    if (!doctor) throw new Error('Doctor not found');
 
-    // Update the User record: set password, activate, and verify
-    const { hashPassword } = await import('../utils/helpers.js');
-    const hashedPassword = await hashPassword(password);
-
+    // Activate and verify the account — keep the doctor's own registration password
     await User.findByIdAndUpdate(doctor.user_id._id, {
-      password_hash: hashedPassword,
       is_active: true,
-      is_verified: true
+      is_verified: true,
     });
 
-    // Send approval email (password is sent as plain text in the email)
-    const emailSubject = 'Your Doctor Application Has Been Approved';
+    const emailSubject = 'Your Doctor Application Has Been Approved — Healix';
     const emailHtml = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #10b981;">Application Approved!</h2>
+        <h2 style="color: #10b981;">Application Approved! 🎉</h2>
         <p>Dear ${doctor.user_id.full_name},</p>
         <p>We are pleased to inform you that your doctor application has been <strong>approved</strong>.</p>
-        
-        <div style="background-color: #f0f9ff; border-left: 4px solid #3b82f6; padding: 15px; margin: 20px 0;">
-          <h3 style="margin-top: 0;">Your Login Credentials:</h3>
-          <p><strong>Email:</strong> ${doctor.user_id.email}</p>
-          <p><strong>Temporary Password:</strong> <code style="background-color: #e0e7ff; padding: 5px 10px; border-radius: 4px; font-family: monospace;">${password}</code></p>
+
+        <div style="background-color: #f0fdf4; border-left: 4px solid #10b981; padding: 15px; margin: 20px 0;">
+          <p style="margin: 0;"><strong>Email:</strong> ${doctor.user_id.email}</p>
+          <p style="margin: 8px 0 0;"><strong>Password:</strong> the password you set when you registered.</p>
         </div>
-        
-        <p style="color: #ef4444; font-weight: bold;">⚠️ Important: Please change your password immediately after your first login for security reasons.</p>
-        
-        <p>You can now log in to the Remote Healthcare Management System and start managing your appointments and patient consultations.</p>
-        
-        <p>If you have any issues or questions, please contact our support team.</p>
-        
-        <p>Best regards,<br/>Remote Healthcare Management System</p>
+
+        <p>You can now log in and start managing your appointments and patient consultations.</p>
+        <p>Best regards,<br/>Healix Team</p>
       </div>
     `;
 
-    await sendEmail(doctorEmail, emailSubject, emailHtml);
+    await sendEmail(doctorEmail || doctor.user_id.email, emailSubject, emailHtml);
 
     return doctor;
   } catch (error) {

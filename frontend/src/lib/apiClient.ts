@@ -500,7 +500,7 @@ class ApiClient {
     return response.data;
   }
 
-  async approveDoctor(data: { doctorId: string; password: string; doctorEmail: string }): Promise<ApiResponse<any>> {
+  async approveDoctor(data: { doctorId: string; doctorEmail: string }): Promise<ApiResponse<any>> {
     const response = await this.client.post('/admin/approve-doctor', data);
     return response.data;
   }
