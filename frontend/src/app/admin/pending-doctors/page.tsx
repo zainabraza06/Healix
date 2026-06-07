@@ -17,7 +17,7 @@ interface Doctor {
   _id: string;
   user_id: {
     _id: string;
-    name: string;
+    full_name: string;
     email: string;
     phone?: string;
   };
@@ -45,7 +45,8 @@ export default function PendingDoctorsPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [pageSize] = useState(10);
 
-  const formatStatus = (status: string): string => {
+  const formatStatus = (status?: string): string => {
+    if (!status) return 'N/A';
     return status
       .split('_')
       .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
@@ -221,14 +222,14 @@ export default function PendingDoctorsPage() {
                       {/* Avatar/Initial */}
                       <div className="md:col-span-1 hidden md:flex items-center justify-center">
                         <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-slate-100 to-slate-200 border border-white shadow-inner flex items-center justify-center text-2xl font-black text-slate-400">
-                          {doctor.user_id.name.charAt(0)}
+                          {doctor.user_id.full_name?.charAt(0) ?? '?'}
                         </div>
                       </div>
 
                       {/* Content */}
                       <div className="md:col-span-8 space-y-6">
                         <div>
-                          <h3 className="text-2xl font-bold text-slate-800">{doctor.user_id.name}</h3>
+                          <h3 className="text-2xl font-bold text-slate-800">{doctor.user_id.full_name}</h3>
                           <div className="flex flex-wrap items-center gap-3 mt-2 text-sm">
                             <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-100">
                               <ShieldCheck className="w-3.5 h-3.5" />
@@ -359,7 +360,7 @@ export default function PendingDoctorsPage() {
                 </div>
                 <h3 className="text-2xl font-black text-slate-800">Approve Application</h3>
                 <p className="text-slate-600 mt-2">
-                  You are about to grant access to <span className="font-bold text-slate-800">{selectedDoctor.user_id.name}</span>.
+                  You are about to grant access to <span className="font-bold text-slate-800">{selectedDoctor.user_id.full_name}</span>.
                 </p>
               </div>
 
@@ -416,7 +417,7 @@ export default function PendingDoctorsPage() {
                 </div>
                 <h3 className="text-2xl font-black text-slate-800">Reject Application</h3>
                 <p className="text-slate-600 mt-2">
-                  Deny access for <span className="font-bold text-slate-800">{selectedDoctor.user_id.name}</span>. This action cannot be undone easily.
+                  Deny access for <span className="font-bold text-slate-800">{selectedDoctor.user_id.full_name}</span>. This action cannot be undone easily.
                 </p>
               </div>
 
