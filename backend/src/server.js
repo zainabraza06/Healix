@@ -14,9 +14,6 @@ dotenv.config();
 
 const app = express();
 
-// Connect to MongoDB
-connectDB();
-
 // Middleware
 app.use(cors({
   origin: config.corsOrigins,
@@ -47,13 +44,13 @@ app.use((req, res) => {
   });
 });
 
-// Start server with Socket.IO
+// Start server first so Cloud Run health checks pass, then connect to DB
 const PORT = config.port;
 const server = http.createServer(app);
 initSocket(server, config.corsOrigins);
 server.listen(PORT, async () => {
   console.log(`\nServer is running on port ${PORT}`);
-  // Initialize all scheduled jobs
+  await connectDB();
   initializeScheduler();
 });
 
