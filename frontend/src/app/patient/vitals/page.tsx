@@ -25,7 +25,7 @@ export default function VitalsPage() {
   const fetchVitals = async () => {
     try {
       setIsLoading(true);
-      const response = await apiClient.getVitalsHistory(90);
+      const response = await apiClient.getVitalsHistory(365);
       if (response.success) {
         setVitals(response.data || []);
       } else {

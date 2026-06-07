@@ -134,10 +134,14 @@ export const getVitalsHistoryController = async (req, res, next) => {
  */
 export const downloadVitalsCSVTemplateController = async (req, res, next) => {
   try {
+    const today = new Date();
+    const fmt = (d) => d.toISOString().split('T')[0];
+    const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+
     const csvTemplate = [
       'date,time,bloodPressureSystolic,bloodPressureDiastolic,heartRate,temperature,oxygenSaturation,respiratoryRate,notes',
-      '2026-01-24,09:30,120,80,72,98.6,98,16,Morning reading',
-      '2026-01-24,14:00,118,78,70,98.4,99,14,Afternoon reading'
+      `${fmt(yesterday)},09:30,120,80,72,98.6,98,16,Morning reading`,
+      `${fmt(today)},14:00,118,78,70,98.4,99,14,Afternoon reading`
     ].join('\n');
     
     res.setHeader('Content-Type', 'text/csv');
